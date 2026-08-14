@@ -5,7 +5,7 @@ export const APP_VERSION = '1.0.0';
 /** GitHub 仓库地址（本地版仓库，发布后确认） */
 export const APP_HOMEPAGE = 'https://github.com/track-tech/pi-meowfish-agent';
 /** 作者署名 */
-export const APP_AUTHOR = 'track-tech';
+export const APP_AUTHOR = 'DeepSeek-Harness';
 
 /** 「关于」对话框文本（双语，支持 help 分组渲染） */
 export function aboutText(lang: 'zh' | 'en'): string {
