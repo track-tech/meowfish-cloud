@@ -1359,6 +1359,10 @@
     if (!voiceActive) return;
     stopSpeak();
     var myToken = ++speakToken;
+    // 保险：确保播放上下文 running（浏览器偶尔会在后台挂起）
+    try {
+      if (audioCtx && audioCtx.state === 'suspended') void audioCtx.resume();
+    } catch (e) { /* ignore */ }
     setVoiceStatus(t('voice-speaking'), 'speaking');
     fetch(withToken('/ui/voice-tts'), {
       method: 'POST',
@@ -1406,8 +1410,9 @@
       var buffer = audioCtx.createBuffer(1, pcm.length, 24000);
       var data = buffer.getChannelData(0);
       for (var j = 0; j < pcm.length; j++) data[j] = pcm[j] / 32768;
+      // 先入队，再启动播放：保证第一块也被播放（旧 bug：直接 playNext 从空队列取 undefined → 永远无声）
+      speakQueue.push(buffer);
       if (!speakSource) playNext(token);
-      else speakQueue.push(buffer);
     } catch (e) { /* ignore bad chunk */ }
   }
 
@@ -1441,7 +1446,7 @@
     playRms = 0;
   }
 
-  /* ---- 声波动效：canvas 圆环，音量驱动（现代化：多层光晕 + 粒子刻度） ---- */
+  /* ---- 水波球动效：多层同心水波 + 中心球体，音量驱动 ---- */
   var animSmooth = 0; // 音量平滑值
   function drawVoiceAnim() {
     if (!voiceActive) return;
@@ -1451,67 +1456,71 @@
     var cx = W / 2, cy = H / 2;
     g.clearRect(0, 0, W, H);
     var vol = voiceState === 'speaking' ? Math.max(playRms, micRms * 0.6) : micRms;
-    // 音量平滑（防抖动）
-    animSmooth += (vol - animSmooth) * 0.35;
+    animSmooth += (vol - animSmooth) * 0.3;
     if (animSmooth < 0) animSmooth = 0;
     var v = Math.min(1, animSmooth);
     var hue = voiceState === 'recording' ? 340 : voiceState === 'speaking' ? 160 : 205;
     var now = Date.now();
-    // 呼吸底座
-    var breathe = 1 + Math.sin(now / 700) * 0.02;
-    var base = 52 * breathe;
-    var ring = base + v * 120;
-    // 外圈大光晕
-    var glow = g.createRadialGradient(cx, cy, ring * 0.5, cx, cy, ring + 46);
-    glow.addColorStop(0, 'hsla(' + hue + ', 85%, 68%, ' + (0.10 + v * 0.16) + ')');
-    glow.addColorStop(1, 'hsla(' + hue + ', 85%, 60%, 0)');
+    var breathe = 1 + Math.sin(now / 750) * 0.025;
+    var R = (86 + v * 26) * breathe; // 球体半径，随音量呼吸
+
+    // 球体主体：径向渐变（亮心 → 半透明边缘）
+    var bg = g.createRadialGradient(cx - R * 0.35, cy - R * 0.35, 4, cx, cy, R * 1.15);
+    bg.addColorStop(0, 'hsla(' + hue + ', 90%, 78%, 0.95)');
+    bg.addColorStop(0.45, 'hsla(' + hue + ', 85%, 62%, 0.75)');
+    bg.addColorStop(1, 'hsla(' + hue + ', 80%, 45%, 0.18)');
     g.beginPath();
-    g.arc(cx, cy, ring + 46, 0, Math.PI * 2);
-    g.fillStyle = glow;
+    g.arc(cx, cy, R, 0, Math.PI * 2);
+    g.fillStyle = bg;
     g.fill();
-    // 双层圆环（外环半透明宽线 + 内环亮线）
+
+    // 球面高光（左上椭圆亮点，模拟水球光泽）
     g.beginPath();
-    g.arc(cx, cy, ring, 0, Math.PI * 2);
-    g.strokeStyle = 'hsla(' + hue + ', 80%, 66%, 0.22)';
-    g.lineWidth = 12;
-    g.stroke();
-    g.beginPath();
-    g.arc(cx, cy, ring, 0, Math.PI * 2);
-    g.strokeStyle = 'hsla(' + hue + ', 90%, 74%, 0.9)';
-    g.lineWidth = 3;
-    g.stroke();
-    // 环绕刻度：32 根渐变短杆，跟随音量 + 旋转
-    var rot = now / 9000;
-    for (var i = 0; i < 32; i++) {
-      var ang = (i / 32) * Math.PI * 2 + rot;
-      var wob = 0.3 + 0.7 * Math.abs(Math.sin(ang * 4 + now / 380));
-      var hgt = 6 + v * 92 * wob;
-      var inner = ring - 10;
-      var x1 = cx + Math.cos(ang) * inner;
-      var y1 = cy + Math.sin(ang) * inner;
-      var x2 = cx + Math.cos(ang) * (inner + hgt);
-      var y2 = cy + Math.sin(ang) * (inner + hgt);
-      var gr = g.createLinearGradient(x1, y1, x2, y2);
-      gr.addColorStop(0, 'hsla(' + hue + ', 90%, 76%, 0.9)');
-      gr.addColorStop(1, 'hsla(' + hue + ', 90%, 60%, 0.15)');
+    g.ellipse(cx - R * 0.34, cy - R * 0.4, R * 0.22, R * 0.13, -0.6, 0, Math.PI * 2);
+    g.fillStyle = 'hsla(' + hue + ', 100%, 92%, 0.55)';
+    g.fill();
+
+    // 水波环：从球心向外扩散，环径随 sin 波动（音量越大波幅越强），波峰亮波谷暗
+    var rings = 22;
+    for (var i = 0; i < rings; i++) {
+      var baseR = (i / rings) * (R * 1.55 + 34) + 5;
+      var ph = baseR * 0.24 - now / 320;
+      var wave = Math.sin(ph) * (2 + v * 15);
+      var rr = Math.max(1.5, baseR + wave);
+      var waveBright = (Math.sin(ph) * 0.5 + 0.5);
+      var a = 0.06 + waveBright * (0.32 + v * 0.38) * (1 - i / rings * 0.55);
+      if (a <= 0.02) continue;
       g.beginPath();
-      g.moveTo(x1, y1);
-      g.lineTo(x2, y2);
-      g.strokeStyle = gr;
-      g.lineWidth = 3.5;
-      g.lineCap = 'round';
+      g.arc(cx, cy, rr, 0, Math.PI * 2);
+      g.strokeStyle = 'hsla(' + hue + ', 88%, ' + (58 + v * 16 + waveBright * 10) + '%, ' + a + ')';
+      g.lineWidth = 1.6;
       g.stroke();
     }
-    // 中心实心球（呼吸 + 音量）
-    var core = 16 + v * 42;
-    var cg = g.createRadialGradient(cx, cy, 2, cx, cy, core + 12);
-    cg.addColorStop(0, 'hsla(' + hue + ', 95%, 82%, 1)');
-    cg.addColorStop(0.55, 'hsla(' + hue + ', 90%, 65%, 0.85)');
-    cg.addColorStop(1, 'hsla(' + hue + ', 85%, 55%, 0)');
+
+    // 外圈偶发涟漪（每 2.4s 扩散一圈，像水珠落水）
+    var ripples = [0.0, 0.55];
+    for (var k = 0; k < ripples.length; k++) {
+      var t = ((now / 2400 + ripples[k]) % 1);
+      var rr2 = 8 + t * (R * 1.9 + 60);
+      var a2 = (1 - t) * (0.16 + v * 0.2);
+      if (a2 <= 0.02) continue;
+      g.beginPath();
+      g.arc(cx, cy, rr2, 0, Math.PI * 2);
+      g.strokeStyle = 'hsla(' + hue + ', 90%, 72%, ' + a2 + ')';
+      g.lineWidth = 2;
+      g.stroke();
+    }
+
+    // 中心亮点（声芯）
+    var core = 7 + v * 14;
+    var cg = g.createRadialGradient(cx, cy, 1, cx, cy, core + 8);
+    cg.addColorStop(0, 'rgba(255,255,255,0.95)');
+    cg.addColorStop(1, 'hsla(' + hue + ', 95%, 78%, 0)');
     g.beginPath();
-    g.arc(cx, cy, core + 12, 0, Math.PI * 2);
+    g.arc(cx, cy, core + 8, 0, Math.PI * 2);
     g.fillStyle = cg;
     g.fill();
+
     rafTimer = requestAnimationFrame(drawVoiceAnim);
   }
 
