@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=24">
+  <link rel="stylesheet" href="/style.css?v=25">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -90,8 +90,19 @@
         <div id="modal-actions"></div>
       </div>
     </div>
+
+    <div id="local-confirm-backdrop" class="hidden">
+      <div id="local-confirm" class="glass">
+        <div id="local-confirm-title"></div>
+        <div id="local-confirm-msg"></div>
+        <div id="local-confirm-actions">
+          <button class="modal-btn primary" id="local-confirm-ok"></button>
+          <button class="modal-btn" id="local-confirm-cancel"></button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script src="/app.js?v=24"></script>
+  <script src="/app.js?v=25"></script>
 </body>
 </html>

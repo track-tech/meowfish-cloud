@@ -359,9 +359,9 @@ export class CfDriver {
     this.emitSync();
   }
 
-  private async saveSession(): Promise<void> {
+  private async saveSession(touch = true): Promise<void> {
     if (!this.session) return;
-    this.session.updatedAt = Date.now();
+    if (touch) this.session.updatedAt = Date.now();
     await this.stores.saveSession(this.session);
     await this.syncSessionList();
     this.emitSync();
@@ -409,7 +409,7 @@ export class CfDriver {
 
   private async syncSessionList(): Promise<void> {
     const list = await this.stores.listSessions();
-    this.ui.setSessions(list.map((s) => ({ id: s.id, type: s.type, title: s.title, model: s.model, updatedAt: s.updatedAt })), this.session?.id ?? '');
+    this.ui.setSessions(list.map((s) => ({ id: s.id, type: s.type, title: s.title, model: s.model, updatedAt: s.updatedAt, pinned: s.pinned === true })), this.session?.id ?? '');
   }
 
   private syncDisplay(): void {
@@ -757,6 +757,28 @@ export class CfDriver {
     await this.syncSessionList();
     await this.emitSync();
     this.ui.pushSystem(this.lang === 'en' ? 'Session deleted' : '已删除会话');
+  }
+
+  /** 置顶/取消置顶会话（侧边栏 📌） */
+  async togglePin(id: string): Promise<void> {
+    const row = await this.stores.loadSession(id);
+    if (!row) {
+      this.ui.pushSystem(this.lang === 'en' ? 'Session not found' : '会话不存在');
+      return;
+    }
+    row.pinned = !(row.pinned === true);
+    await this.stores.saveSession(row);
+    // 若置顶的是当前会话，内存态同步 pinned 且不刷新 updatedAt
+    if (this.session && this.session.id === id) {
+      this.session.pinned = row.pinned;
+    }
+    await this.syncSessionList();
+    await this.emitSync();
+    this.ui.pushSystem(
+      row.pinned
+        ? (this.lang === 'en' ? `Pinned: ${row.title}` : `已置顶: ${row.title}`)
+        : (this.lang === 'en' ? `Unpinned: ${row.title}` : `已取消置顶: ${row.title}`),
+    );
   }
 
   async deleteSessions(ids: string[]): Promise<void> {

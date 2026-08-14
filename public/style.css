@@ -281,6 +281,29 @@ html.light #sidebar { background: rgba(255, 255, 255, 0.78); }
 .session-item:hover .session-del { opacity: 1; }
 .session-del:hover { background: rgba(243, 139, 168, 0.2); color: var(--error); transform: rotate(90deg) scale(1.15); }
 
+/* 置顶按钮 📌：默认半透明，置顶时高亮 */
+.session-pin {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.session-item:hover .session-pin { opacity: 1; }
+.session-pin:hover { background: rgba(var(--accent-rgb), 0.18); transform: scale(1.15); }
+.session-pin.pinned {
+  opacity: 1;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.16);
+}
+
 .session-check {
   flex: none;
   width: 18px;
@@ -1132,6 +1155,52 @@ input[type="checkbox"] { accent-color: var(--accent); }
   color: #0a0e1a;
   font-weight: 800;
   border-color: transparent;
+}
+
+/* ---- 本地居中确认弹窗（删除会话等，替代浏览器原生 confirm） ---- */
+#local-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 20, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 110;
+  padding: 16px;
+  animation: fadeIn 0.18s ease both;
+}
+
+#local-confirm {
+  border-radius: 22px;
+  width: 100%;
+  max-width: 380px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: scaleIn 0.22s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+#local-confirm-title {
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--accent);
+}
+
+#local-confirm-msg {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+#local-confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 
 /* ---- 浅色主题适配（玻璃从白透亮换成深色投影体系） ---- */

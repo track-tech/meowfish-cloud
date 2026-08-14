@@ -211,6 +211,9 @@ export class MeowFishApp {
       case 'delete-sessions':
         if (Array.isArray(body.ids)) this.state.waitUntil(driver.deleteSessions(body.ids.filter((x): x is string => typeof x === 'string')));
         return json({ ok: true });
+      case 'toggle-pin':
+        if (typeof body.id === 'string') this.state.waitUntil(driver.togglePin(body.id));
+        return json({ ok: true });
       case 'local-config':
         // 浏览器推送本地用户配置（模型/用户设定/SSH 凭据，存 localStorage）
         driver.applyLocalConfig(body.config);

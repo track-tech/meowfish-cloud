@@ -81,6 +81,8 @@ export interface SessionListItem {
   title: string;
   model: string;
   updatedAt: number;
+  /** 侧边栏置顶 */
+  pinned?: boolean;
 }
 
 export interface UiHost {

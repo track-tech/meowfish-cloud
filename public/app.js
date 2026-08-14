@@ -15,10 +15,11 @@
       'send': '发送', 'no-match': '（无匹配项）', 'close': '关闭', 'confirm': '确认',
       'status-thinking': '思考中…', 'status-streaming': '输出中', 'status-tool': '工具运行中',
       'status-waiting': '等待授权…', 'status-error': '出错了', 'status-success': '完成',
-      'no-sessions': '还没有会话', 'delete-session': '删除会话', 'current': '当前',
+      'no-sessions': '还没有会话', 'delete-session': '删除会话', 'current': '当前', 'pin': '置顶',
       'recent-sessions': '最近会话', 'empty-session': '未命名会话',
       'confirm-del-session': '确定删除这个会话吗？',
       'confirm-del-sessions': '确定删除选中的 {n} 个会话吗？此操作不可恢复。',
+      'confirm-title': '确认操作',
       'daynight': '白日 / 暗夜切换（浅滩 ↔ 深海）',
       'time-now': '刚刚', 'time-min': ' 分钟前', 'time-hour': ' 小时前', 'time-yesterday': '昨天', 'time-day': '{m}月{d}日',
       'tooltips': {
@@ -37,10 +38,11 @@
       'send': 'Send', 'no-match': '（no match）', 'close': 'Close', 'confirm': 'OK',
       'status-thinking': 'Thinking…', 'status-streaming': 'Writing', 'status-tool': 'Tool running',
       'status-waiting': 'Awaiting approval…', 'status-error': 'Error', 'status-success': 'Done',
-      'no-sessions': 'No sessions yet', 'delete-session': 'Delete session', 'current': 'Current',
+      'no-sessions': 'No sessions yet', 'delete-session': 'Delete session', 'current': 'Current', 'pin': 'Pin',
       'recent-sessions': 'Recent Sessions', 'empty-session': 'Untitled Session',
       'confirm-del-session': 'Delete this session?',
       'confirm-del-sessions': 'Delete {n} selected sessions? This cannot be undone.',
+      'confirm-title': 'Confirm',
       'daynight': 'Day / Night toggle (Shoal ↔ Deep Sea)',
       'time-now': 'just now', 'time-min': 'm ago', 'time-hour': 'h ago', 'time-yesterday': 'Yesterday', 'time-day': '{m}/{d}',
       'tooltips': {
@@ -531,11 +533,11 @@
   function renderSessions() {
     var list = $('session-list');
     var items = meta.sessions || [];
-    // 内容签名（不含高亮）：id/标题/时间/管理模式/勾选/工具标记任一变化才重建
+    // 内容签名（不含高亮）：id/标题/时间/置顶/管理模式/勾选/工具标记任一变化才重建
     var contentKey = JSON.stringify([
       manageMode,
       meta.tools === true,
-      items.map(function (s) { return [s.id, s.title, s.updatedAt]; }),
+      items.map(function (s) { return [s.id, s.title, s.updatedAt, s.pinned === true]; }),
       Object.keys(selected).filter(function (k) { return selected[k]; }).sort(),
     ]);
     if (contentKey === lastSessionKey) {
@@ -567,6 +569,7 @@
       var active = s.id === meta.sessionId;
       var isCurrent = s.id === meta.sessionId;
       var checked = selected[s.id] && !isCurrent;
+      var pinned = s.pinned === true;
       return (
         '<div class="session-item' + (active ? ' active' : '') + (checked ? ' checked' : '') + '" data-id="' + esc(s.id) + '">' +
         (manageMode
@@ -580,7 +583,9 @@
         '</div>' +
         '<div class="session-meta">' + esc(relTime(s.updatedAt)) + '</div>' +
         '</div>' +
-        (manageMode ? '' : '<button class="session-del" title="' + t('delete-session') + '">×</button>') +
+        (manageMode ? '' :
+          '<button class="session-pin' + (pinned ? ' pinned' : '') + '" title="' + t('pin') + '">📌</button>' +
+          '<button class="session-del" title="' + t('delete-session') + '">×</button>') +
         '</div>'
       );
     }).join('') || '<div class="session-empty">' + t('no-sessions') + '</div>';
@@ -599,6 +604,7 @@
           return;
         }
         if (e.target.closest('.session-del')) return;
+        if (e.target.closest('.session-pin')) return;
         // 防抖：250ms 内忽略连点，避免异步加载竞态（先点后到）
         var now = Date.now();
         if (now - lastSessionClick < 250) return;
@@ -606,13 +612,20 @@
         post('/ui/load-session', { id: id });
         closeSidebar();
       });
+      var pinBtn = el.querySelector('.session-pin');
+      if (pinBtn) {
+        pinBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          post('/ui/toggle-pin', { id: el.getAttribute('data-id') });
+        });
+      }
       var delBtn = el.querySelector('.session-del');
       if (delBtn) {
         delBtn.addEventListener('click', function (e) {
           e.stopPropagation();
-          if (window.confirm(t('confirm-del-session'))) {
+          localConfirm(t('confirm-del-session'), function () {
             post('/ui/delete-session', { id: el.getAttribute('data-id') });
-          }
+          });
         });
       }
     });
@@ -843,6 +856,35 @@
     $('modal-backdrop').classList.add('hidden');
   }
 
+  /* ---------- 本地居中确认弹窗（删除会话等，替代浏览器原生 confirm） ---------- */
+
+  function localConfirm(message, onOk) {
+    var backdrop = $('local-confirm-backdrop');
+    $('local-confirm-title').textContent = t('confirm-title');
+    $('local-confirm-msg').textContent = message;
+    backdrop.classList.remove('hidden');
+    var okBtn = $('local-confirm-ok');
+    var cancelBtn = $('local-confirm-cancel');
+    okBtn.textContent = t('confirm');
+    cancelBtn.textContent = t('cancel');
+    var done = false;
+    var finish = function (result) {
+      if (done) return;
+      done = true;
+      backdrop.classList.add('hidden');
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      backdrop.onclick = null;
+      if (result) onOk();
+    };
+    okBtn.onclick = function () { finish(true); };
+    cancelBtn.onclick = function () { finish(false); };
+    backdrop.onclick = function (e) {
+      if (e.target === backdrop) finish(false);
+    };
+    okBtn.focus();
+  }
+
   /* ---------- 本地用户配置（localStorage 缓存：模型/用户设定/SSH 凭据存浏览器，云端不落盘） ---------- */
   var LOCAL_CONFIG_KEY = 'meowfish-local-config';
 
@@ -1063,10 +1105,11 @@
   $('btn-manage-delete').addEventListener('click', function () {
     var ids = (meta.sessions || []).filter(function (s) { return selected[s.id]; }).map(function (s) { return s.id; });
     if (!ids.length) return;
-    if (!window.confirm(t('confirm-del-sessions').replace('{n}', String(ids.length)))) return;
-    post('/ui/delete-sessions', { ids: ids });
-    setManageMode(false);
-    $('btn-manage').textContent = t('manage');
+    localConfirm(t('confirm-del-sessions').replace('{n}', String(ids.length)), function () {
+      post('/ui/delete-sessions', { ids: ids });
+      setManageMode(false);
+      $('btn-manage').textContent = t('manage');
+    });
   });
   $('tools-switch').addEventListener('change', function () { post('/ui/command', { line: '/tools' }); });
   $('websearch-switch').addEventListener('change', function () { post('/ui/command', { line: '/websearch' }); });

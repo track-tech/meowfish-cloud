@@ -12,6 +12,8 @@ export interface CfSessionRow {
   /** 创建时间（旧数据可能缺失，回退 updatedAt） */
   createdAt?: number;
   updatedAt: number;
+  /** 侧边栏置顶（可选，旧数据缺失） */
+  pinned?: boolean;
   messages: ChatMessage[];
   usage: Usage;
 }
@@ -28,11 +30,13 @@ export class MemoryStores implements CfStores {
   private sessions = new Map<string, CfSessionRow>();
 
   async listSessions(): Promise<CfSessionRow[]> {
-    // 按创建时间排序（新创建的在上）；旧数据无 createdAt 时用 updatedAt 兜底。
+    // 排序：置顶的排最前（组内按创建时间）；其余按创建时间。
     // 不用 updatedAt 排序：切换会话/发消息会更新它，导致列表乱跳
-    return [...this.sessions.values()].sort(
-      (a, b) => (b.createdAt ?? b.updatedAt) - (a.createdAt ?? a.updatedAt),
-    );
+    const byCreated = (a: CfSessionRow, b: CfSessionRow) => (b.createdAt ?? b.updatedAt) - (a.createdAt ?? a.updatedAt);
+    const all = [...this.sessions.values()];
+    const pinned = all.filter((s) => s.pinned).sort(byCreated);
+    const rest = all.filter((s) => !s.pinned).sort(byCreated);
+    return [...pinned, ...rest];
   }
 
   async loadSession(id: string): Promise<CfSessionRow | null> {
