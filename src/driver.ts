@@ -295,13 +295,15 @@ export class CfDriver {
   }
 
   private newSession(title: string): CfSessionRow {
+    const now = Date.now();
     return {
       id: crypto.randomUUID(),
       type: 'rp',
       title,
       model: this.profile?.name ?? '',
       character: title,
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
       messages: [],
       usage: { promptTokens: 0, completionTokens: 0 },
     };
@@ -734,7 +736,7 @@ export class CfDriver {
       this.ui.pushSystem(this.lang === 'en' ? 'Failed to load session' : '会话加载失败');
       return;
     }
-    if (this.session) await this.saveSession();
+    // 切换会话不保存旧会话：会话已在消息变更时落库，这里保存会刷新 updatedAt（列表时间变「刚刚」且触发重排）
     this.session = row;
     const cardName = row.character;
     this.card = this.cards.find((c) => c.name === cardName)?.data ?? this.card;

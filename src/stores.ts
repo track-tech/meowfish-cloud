@@ -9,6 +9,8 @@ export interface CfSessionRow {
   title: string;
   model: string;
   character?: string;
+  /** 创建时间（旧数据可能缺失，回退 updatedAt） */
+  createdAt?: number;
   updatedAt: number;
   messages: ChatMessage[];
   usage: Usage;
@@ -26,7 +28,11 @@ export class MemoryStores implements CfStores {
   private sessions = new Map<string, CfSessionRow>();
 
   async listSessions(): Promise<CfSessionRow[]> {
-    return [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    // 按创建时间排序（新创建的在上）；旧数据无 createdAt 时用 updatedAt 兜底。
+    // 不用 updatedAt 排序：切换会话/发消息会更新它，导致列表乱跳
+    return [...this.sessions.values()].sort(
+      (a, b) => (b.createdAt ?? b.updatedAt) - (a.createdAt ?? a.updatedAt),
+    );
   }
 
   async loadSession(id: string): Promise<CfSessionRow | null> {

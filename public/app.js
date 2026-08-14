@@ -20,6 +20,7 @@
       'confirm-del-session': '确定删除这个会话吗？',
       'confirm-del-sessions': '确定删除选中的 {n} 个会话吗？此操作不可恢复。',
       'daynight': '白日 / 暗夜切换（浅滩 ↔ 深海）',
+      'time-now': '刚刚', 'time-min': ' 分钟前', 'time-hour': ' 小时前', 'time-yesterday': '昨天', 'time-day': '{m}月{d}日',
       'tooltips': {
         'tools': '电脑权限：开启后角色可读写文件、执行命令（需授权）',
         'websearch': '联网搜索：开启后角色可搜索最新信息（免授权）',
@@ -41,6 +42,7 @@
       'confirm-del-session': 'Delete this session?',
       'confirm-del-sessions': 'Delete {n} selected sessions? This cannot be undone.',
       'daynight': 'Day / Night toggle (Shoal ↔ Deep Sea)',
+      'time-now': 'just now', 'time-min': 'm ago', 'time-hour': 'h ago', 'time-yesterday': 'Yesterday', 'time-day': '{m}/{d}',
       'tooltips': {
         'tools': 'Computer access: lets the character read/write files and run commands (with approval)',
         'websearch': 'Web search: lets the character search the latest info (no approval needed)',
@@ -284,6 +286,8 @@
     var div = document.createElement('div');
     div.innerHTML = msgHtml(m);
     var el = div.firstElementChild;
+    // 批量恢复（切换会话后 clear+重填）：不播入场动画，避免整屏闪烁
+    if (bulkFill) el.classList.add('no-anim');
     messagesEl.appendChild(el);
     if (m.streaming) {
       streamingEl = el.querySelector('.bubble');
@@ -418,6 +422,16 @@
     messagesEl.innerHTML = '';
   }
 
+  /* 批量填充窗口：clear 后短时间内追加的消息视为「会话恢复」，不播入场动画 */
+  var bulkFill = false;
+  var bulkTimer = null;
+
+  function markBulkFill() {
+    bulkFill = true;
+    if (bulkTimer) clearTimeout(bulkTimer);
+    bulkTimer = setTimeout(function () { bulkFill = false; }, 400);
+  }
+
   function scrollBottom() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
@@ -500,20 +514,55 @@
 
   function relTime(ts) {
     var diff = (Date.now() - ts) / 1000;
-    if (diff < 60) return '刚刚';
-    if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
-    if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
-    if (diff < 86400 * 2) return '昨天';
+    if (diff < 60) return t('time-now');
+    if (diff < 3600) return Math.floor(diff / 60) + t('time-min');
+    if (diff < 86400) return Math.floor(diff / 3600) + t('time-hour');
+    if (diff < 86400 * 2) return t('time-yesterday');
     var d = new Date(ts);
-    return d.getMonth() + 1 + '月' + d.getDate() + '日';
+    return t('time-day').replace('{m}', String(d.getMonth() + 1)).replace('{d}', String(d.getDate()));
   }
 
   var manageMode = false;
   var selected = {};
+  var lastSessionClick = 0; // 切换会话防抖：连点竞态保护（服务端异步加载，避免先点后到）
+  var lastSessionKey = '';  // 列表渲染缓存：内容未变时不重建（避免切换会话/操作后列表闪烁）
+  var lastSessionId = '';   // 当前高亮会话：仅高亮变化时局部更新，不重建列表
 
   function renderSessions() {
     var list = $('session-list');
     var items = meta.sessions || [];
+    // 内容签名（不含高亮）：id/标题/时间/管理模式/勾选/工具标记任一变化才重建
+    var contentKey = JSON.stringify([
+      manageMode,
+      meta.tools === true,
+      items.map(function (s) { return [s.id, s.title, s.updatedAt]; }),
+      Object.keys(selected).filter(function (k) { return selected[k]; }).sort(),
+    ]);
+    if (contentKey === lastSessionKey) {
+      // 仅高亮（会话切换）变化：局部更新 active/cur-tag/tools-mark，不重建、不重播动画
+      if (meta.sessionId !== lastSessionId) {
+        lastSessionId = meta.sessionId;
+        var byId = {};
+        items.forEach(function (s) { byId[s.id] = s; });
+        list.querySelectorAll('.session-item').forEach(function (el) {
+          var id = el.getAttribute('data-id');
+          var active = id === meta.sessionId;
+          el.classList.toggle('active', active);
+          var s = byId[id];
+          var titleEl = el.querySelector('.session-title');
+          if (titleEl && s) {
+            titleEl.innerHTML =
+              (active ? '<span class="cur-tag">' + t('current') + '</span>' : '') +
+              (active && meta.tools ? '<span class="tools-mark" title="⚙">⚙</span>' : '') +
+              esc(s.title || t('empty-session'));
+          }
+        });
+      }
+      updateManageBar();
+      return;
+    }
+    lastSessionKey = contentKey;
+    lastSessionId = meta.sessionId;
     list.innerHTML = items.map(function (s) {
       var active = s.id === meta.sessionId;
       var isCurrent = s.id === meta.sessionId;
@@ -540,12 +589,20 @@
         var id = el.getAttribute('data-id');
         if (manageMode) {
           if (id === meta.sessionId) return; // 当前会话不可选
+          // 局部更新勾选状态（不重建列表：保留滚动位置、不重播动画）
           selected[id] = !selected[id];
-          renderSessions();
+          var on = selected[id];
+          el.classList.toggle('checked', on);
+          var chk = el.querySelector('.session-check');
+          if (chk) chk.textContent = on ? '✓' : '';
           updateManageBar();
           return;
         }
         if (e.target.closest('.session-del')) return;
+        // 防抖：250ms 内忽略连点，避免异步加载竞态（先点后到）
+        var now = Date.now();
+        if (now - lastSessionClick < 250) return;
+        lastSessionClick = now;
         post('/ui/load-session', { id: id });
         closeSidebar();
       });
@@ -570,7 +627,7 @@
     if (manageMode) {
       $('manage-select-all').checked = selectable.length > 0 && selectable.every(function (s) { return selected[s.id]; });
       var count = selectable.filter(function (s) { return selected[s.id]; }).length;
-      $('btn-manage-delete').textContent = '删除所选' + (count ? '(' + count + ')' : '');
+      $('btn-manage-delete').textContent = t('delete-selected') + (count ? '(' + count + ')' : '');
     }
   }
 
@@ -808,7 +865,16 @@
   function loadLocalData() {
     try {
       var raw = localStorage.getItem(LOCAL_DATA_KEY);
-      return raw ? JSON.parse(raw) : null;
+      var data = raw ? JSON.parse(raw) : null;
+      // 旧数据补齐 createdAt（缺失时用当前 updatedAt 固化一次），保证按创建时间稳定排序
+      if (data && Array.isArray(data.sessions)) {
+        data.sessions.forEach(function (s) {
+          if (s && typeof s.updatedAt === 'number' && typeof s.createdAt !== 'number') {
+            s.createdAt = s.updatedAt;
+          }
+        });
+      }
+      return data;
     } catch (e) { return null; }
   }
 
@@ -888,6 +954,7 @@
           break;
         case 'clear':
           clearMsgs();
+          markBulkFill();
           break;
         case 'replaceLast':
           replaceLast(m.msg);

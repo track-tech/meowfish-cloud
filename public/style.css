@@ -517,6 +517,10 @@ html.light #sidebar { background: rgba(255, 255, 255, 0.78); }
 
 .msg { margin-bottom: 16px; animation: fadeUp 0.25s ease both; }
 
+/* 批量恢复（切换会话）的消息不播入场动画，避免整屏闪烁 */
+.msg.no-anim,
+.msg.no-anim .bubble { animation: none; }
+
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
