@@ -228,15 +228,17 @@ export class MeowFishApp {
         }
       }
       case 'voice-tts': {
-        // 语音合成：SSE 流式返回 PCM16 base64 分片
+        // 语音合成：SSE 流式返回 PCM16 base64 分片（voice 音色 / style 情感风格）
         const key = request.headers.get('x-mimo-key') || '';
         const text = typeof body.text === 'string' ? body.text : '';
         if (!key || !text) return json({ ok: false, error: '缺少 MiMo API Key 或文本' }, 400);
+        const voice = typeof body.voice === 'string' && body.voice ? body.voice : 'mimo_default';
+        const style = typeof body.style === 'string' && body.style ? body.style : undefined;
         const encoder = new TextEncoder();
         const stream = new ReadableStream<Uint8Array>({
           async start(controller) {
             try {
-              await mimoTts(key, text, { voice: 'mimo_default', stream: true }, (pcm) => {
+              await mimoTts(key, text, { voice, style, stream: true }, (pcm) => {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ pcm })}\n\n`));
               });
               controller.enqueue(encoder.encode('data: [DONE]\n\n'));

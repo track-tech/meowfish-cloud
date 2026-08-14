@@ -1051,11 +1051,28 @@
             if (msgs.length) {
               var lastMsg = msgs[msgs.length - 1];
               var raw = lastMsg.getAttribute('data-raw') || '';
-              var txt = (raw || lastMsg.textContent || '').replace(/\s+/g, ' ').trim();
+              var full = (raw || lastMsg.textContent || '').replace(/\s+/g, ' ').trim();
+              // 解析模型输出的语音标记 {{voice: 音色|风格描述}} → TTS 参数；标记本身不朗读
+              var voiceTag = full.match(/\{\{\s*voice\s*:\s*([^|}]+)\|([^}]+)\s*\}\}/);
+              var txt = full;
+              var ttsVoice = undefined;
+              var ttsStyle = undefined;
+              if (voiceTag) {
+                ttsVoice = voiceTag[1].trim() || undefined;
+                ttsStyle = voiceTag[2].trim() || undefined;
+                txt = full.replace(/\{\{\s*voice\s*:\s*[^}]+\}\}/g, '').replace(/\s+/g, ' ').trim();
+              } else {
+                // 没有标记：也去掉裸 {{voice:...}} 残余（模型格式漂移时兜底）
+                txt = full.replace(/\{\{\s*voice\b[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
+              }
               if (txt) {
                 lastAssistantText = txt;
                 $('vv-bot-line').textContent = txt;
-                speakText(txt);
+                // 气泡显示也去掉语音标记（文字界面保持干净）
+                if (lastMsg && voiceTag) {
+                  lastMsg.textContent = txt;
+                }
+                speakText(txt, ttsVoice, ttsStyle);
               } else {
                 setVoiceStatus(t('voice-listening'), 'listening');
               }
@@ -1146,6 +1163,8 @@
     $('btn-voice').classList.add('on');
     $('voice-view').classList.remove('hidden');
     $('vv-hint').textContent = t('voice-hint');
+    // 通知服务端进入语音对话模式：注入语音规则（口语化 + 输出 {{voice}} 标记）
+    post('/ui/command', { line: '/voice' });
     lastVoiceText = '';
     lastAssistantText = '';
     $('vv-user-line').textContent = '';
@@ -1159,13 +1178,13 @@
         }
         // 16kHz 单声道采集（ScriptProcessor 收集 PCM；VAD 与动效直接从 chunks 算音量）
         var src = vcMicCtx.createMediaStreamSource(s);
-        var proc = vcMicCtx.createScriptProcessor(4096, 1, 1);
+        var proc = vcMicCtx.createScriptProcessor(2048, 1, 1);
         var mute = vcMicCtx.createGain();
         mute.gain.value = 0; // 采集不播放（防回授）
         vc = {
           micCtx: vcMicCtx, proc, micStream: s,
           recChunks: [], segStart: 0, vadSpeech: 0, vadSilence: 0,
-          vadTh: 0.02, noiseSamples: 0, noiseSum: 0, segLen: 0, busy: false, suppressSpeak: false,
+          vadTh: 0.008, noiseSamples: 0, noiseSum: 0, segLen: 0, busy: false, suppressSpeak: false,
         };
         src.connect(proc);
         proc.connect(mute);
@@ -1190,6 +1209,8 @@
     voiceActive = false;
     stopSpeak();
     stopVadLoop();
+    // 通知服务端退出语音对话模式
+    post('/ui/command', { line: '/voice off' });
     if (vc) {
       try { vc.proc.disconnect(); } catch (e) { /* ignore */ }
       try { vc.micStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
@@ -1221,19 +1242,25 @@
 
   function vadTick() {
     if (!voiceActive || !vc) return;
-    // 直接从最近采集的 PCM 算麦克风音量（不依赖 Analyser：采集上下文必须 running）
+    // 直接从最近采集的 PCM 算音量：RMS（动效）+ peak（VAD，更灵敏）
     var chunks = vc.recChunks;
     var tailSamples = 1600; // 最近 0.1s（16kHz）
-    var sum = 0, n = 0;
+    var sum = 0, n = 0, peak = 0;
     for (var ci = chunks.length - 1; ci >= 0 && n < tailSamples; ci--) {
       var c = chunks[ci];
       for (var si = c.length - 1; si >= 0 && n < tailSamples; si--) {
         var v = c[si];
         sum += v * v;
+        var av = v < 0 ? -v : v;
+        if (av > peak) peak = av;
         n++;
       }
     }
     micRms = n ? Math.sqrt(sum / n) : 0;
+    // 软增益：普通麦克风音量偏小，放大后 VAD 与动效都更跟手
+    var gain = 2.2;
+    micRms = Math.min(1, micRms * gain);
+    var effPeak = Math.min(1, peak * gain);
     // 读播放音量（动效：朗读时圆环跟随声音）
     if (playAnalyser) {
       var pdata = new Float32Array(playAnalyser.fftSize);
@@ -1243,18 +1270,20 @@
       playRms = Math.sqrt(psum / pdata.length) * 1.6; // 播放源音量较小，放大一点
       if (playRms > 1) playRms = 1;
     }
-    // 自适应底噪：前 0.8s 采集，阈值 = max(0.02, 底噪*3)
+    // 自适应底噪：前 0.8s 采集，阈值 = max(0.008, 底噪*2.5)
     if (vc.noiseSamples < 8) {
       vc.noiseSum += micRms;
       vc.noiseSamples++;
       if (vc.noiseSamples >= 8) {
         var noise = vc.noiseSum / 8;
-        vc.vadTh = Math.max(0.02, noise * 3);
+        vc.vadTh = Math.max(0.008, noise * 2.5);
       }
       return;
     }
     var th = vc.vadTh;
-    if (micRms > th) { vc.vadSpeech++; vc.vadSilence = 0; }
+    // 语音判定：peak 超阈值即算有声（比纯 RMS 灵敏，远麦轻声也能触发）
+    var voiced = effPeak > th || micRms > th * 0.7;
+    if (voiced) { vc.vadSpeech++; vc.vadSilence = 0; }
     else { vc.vadSilence++; vc.vadSpeech = 0; }
 
     switch (voiceState) {
@@ -1355,7 +1384,7 @@
 
   /* ---- 朗读：SSE 流式 PCM16 → 边收边播（可打断） ---- */
   var speakToken = 0; // 打断令牌：递增后旧流的所有块全部丢弃
-  function speakText(text) {
+  function speakText(text, ttsVoice, ttsStyle) {
     if (!voiceActive) return;
     stopSpeak();
     var myToken = ++speakToken;
@@ -1364,10 +1393,13 @@
       if (audioCtx && audioCtx.state === 'suspended') void audioCtx.resume();
     } catch (e) { /* ignore */ }
     setVoiceStatus(t('voice-speaking'), 'speaking');
+    var payload = { text: text };
+    if (ttsVoice) payload.voice = ttsVoice;
+    if (ttsStyle) payload.style = ttsStyle;
     fetch(withToken('/ui/voice-tts'), {
       method: 'POST',
       headers: voiceHeaders(),
-      body: JSON.stringify({ text: text }),
+      body: JSON.stringify(payload),
     }).then(function (res) {
       if (!res || !res.ok || !res.body) throw new Error((t('voice-fail') + 'HTTP ' + (res ? res.status : '?')));
       var reader = res.body.getReader();

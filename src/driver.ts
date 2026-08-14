@@ -2,7 +2,7 @@ import { chat, LlmError } from './llm/client.js';
 import type { ChatMessage, ModelProfile, ToolDef } from './llm/types.js';
 import { MODEL_PRESETS, presetKeyOf, type AppConfig } from './llm/profiles-core.js';
 import { emptyCard, parseCardJson, type CharacterCard } from './rp/card-core.js';
-import { buildRpSystem, buildToolSection, type RpUser } from './rp/prompt.js';
+import { buildRpSystem, buildToolSection, buildVoiceSection, type RpUser } from './rp/prompt.js';
 import { webSearch } from './core/web.js';
 import { buildGrepCmd, buildListCmd, buildReadCmd, buildWriteCmd } from './core/ssh-cmds.js';
 import { globToRegExp } from './core/glob.js';
@@ -221,6 +221,15 @@ export class CfDriver {
   cards: { name: string; data: CharacterCard }[] = [];
   private abortCtrl: AbortController | null = null;
   private yolo = false;
+  /** 实时语音对话模式（免提语音：注入语音规则，回复走 TTS 朗读） */
+  private voiceChat = false;
+
+  /** 开启/关闭语音对话模式（前端进入/退出语音视图时调用） */
+  setVoiceChat(on: boolean): void {
+    if (this.voiceChat === on) return;
+    this.voiceChat = on;
+    this.ui.pushSystem(on ? '语音对话模式已开启 —— 回复将口语化并带语音标记' : '语音对话模式已关闭');
+  }
 
   constructor(
     private ui: WebUi,
@@ -648,7 +657,7 @@ export class CfDriver {
   private async toolLoop(card: CharacterCard, onText: (delta: string) => void, toolDefs: ToolDef[] = TOOL_DEFS): Promise<void> {
     const systemMsg: ChatMessage = {
       role: 'system',
-      content: buildRpSystem(card, this.rpUser) + '\n\n' + buildToolSection(toolDefs.map((t) => t.function.name), this.sshCfg() ? `SSH 远程服务器 ${this.sshLabel()}` : '（未配置 SSH 服务器）'),
+      content: buildRpSystem(card, this.rpUser) + '\n\n' + buildToolSection(toolDefs.map((t) => t.function.name), this.sshCfg() ? `SSH 远程服务器 ${this.sshLabel()}` : '（未配置 SSH 服务器）') + (this.voiceChat ? '\n\n' + buildVoiceSection() : ''),
     };
     const messages: ChatMessage[] = [...this.session!.messages];
     let streaming = false;
@@ -816,6 +825,9 @@ export class CfDriver {
         return;
       case 'websearch':
         this.toggleWebSearch();
+        return;
+      case 'voice':
+        this.setVoiceChat(args[0] !== 'off');
         return;
       case 'ssh':
         this.openSshForm();
