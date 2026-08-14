@@ -1,0 +1,16 @@
+{
+  "name": "meowfish-cloud",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MeowFish 云端版（Cloudflare Worker + 远程工具守护）——从 Pi-MeowFish Agent 分割出的独立项目",
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "wrangler": "^3.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  }
+}

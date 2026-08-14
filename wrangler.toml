@@ -1,0 +1,24 @@
+name = "meowfish-cloud"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+
+# 静态前端（协议与本地 WebUI 完全一致）
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[vars]
+# 未配置 SSH 时工具可转发到远程工具守护（可选）；SSH 直连模式无需设置
+# 云端零持久化：不绑定数据库，会话/角色卡/配置全部存各浏览器 localStorage
+TOOL_SERVER_URL = ""
+TOOL_SERVER_TOKEN = ""
+
+# 应用状态单实例（所有请求/SSE 路由到同一个 Durable Object，保证会话与事件一致）
+[[durable_objects.bindings]]
+name = "MEOWFISH"
+class_name = "MeowFishApp"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MeowFishApp"]

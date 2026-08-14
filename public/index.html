@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>MeowFish · 喵鱼</title>
+  <link rel="stylesheet" href="/style.css?v=20">
+</head>
+<body>
+  <aside id="sidebar" class="glass">
+    <div class="sidebar-head">
+      <span class="logo">ฅ(^•ω•^)ฅ</span>
+      <span class="logo-text">MeowFish</span>
+      <span class="spacer"></span>
+      <button id="btn-manage" class="manage-btn" data-i18n="manage" data-i18n-title="manage">管理</button>
+    </div>
+    <button id="btn-newchat" class="newchat-btn" data-i18n="new-chat">＋ 新建对话</button>
+    <div class="session-region">
+      <div class="session-list-title" data-i18n="recent-sessions">最近会话</div>
+      <div id="session-list"></div>
+    </div>
+    <div id="manage-bar" class="hidden">
+      <label class="manage-all"><input type="checkbox" id="manage-select-all"> <span data-i18n="select-all">全选</span></label>
+      <span class="spacer"></span>
+      <button id="btn-manage-cancel" data-i18n="cancel">取消</button>
+      <button id="btn-manage-delete" data-i18n="delete-selected">删除所选</button>
+    </div>
+  </aside>
+  <div id="sidebar-backdrop" class="hidden"></div>
+
+  <div id="main">
+    <header id="header" class="glass">
+      <button id="btn-sidebar" class="pill">☰</button>
+      <span id="mode-badge">RP</span>
+      <span id="title" class="title"></span>
+      <span id="yolo-badge" class="hidden">YOLO</span>
+      <span id="meta-info" class="meta"></span>
+      <span class="spacer"></span>
+      <span class="tools-wrap" data-i18n-title="tools">
+        <span class="tools-label">🖥️</span>
+        <label class="switch">
+          <input type="checkbox" id="tools-switch">
+          <span class="slider"></span>
+        </label>
+      </span>
+      <span class="tools-wrap" data-i18n-title="websearch">
+        <span class="tools-label">🌐</span>
+        <label class="switch">
+          <input type="checkbox" id="websearch-switch">
+          <span class="slider"></span>
+        </label>
+      </span>
+      <button id="btn-model" class="pill" data-i18n="model">模型</button>
+      <button id="btn-daynight" class="pill" title="🌙">🌙</button>
+      <button id="btn-theme" class="pill" data-i18n="theme">主题</button>
+      <button id="btn-menu" class="pill" data-i18n="menu">菜单</button>
+    </header>
+
+    <main id="messages"></main>
+
+    <div id="statusbar" class="glass hidden">
+      <span id="kaomoji"></span><span id="status-text"></span>
+    </div>
+
+    <div id="quickbar" class="glass">
+      <button data-cmd="/swipe" data-i18n="regenerate" data-i18n-title="regenerate">🔄 重生成</button>
+      <button data-cmd="/continue" data-i18n="continue" data-i18n-title="continue">✍️ 续写</button>
+      <button data-cmd="/character" data-i18n="character" data-i18n-title="character">🐱 角色</button>
+      <button data-cmd="/profile" data-i18n="profile" data-i18n-title="profile">📝 设定</button>
+      <button data-cmd="/tools" data-i18n="tools" data-i18n-title="tools">🛠️ 工具</button>
+      <button data-cmd="/search" data-i18n="search" data-i18n-title="search">🔍 搜索</button>
+      <button data-cmd="/export" data-i18n="export" data-i18n-title="export">⬇️ 导出</button>
+      <button data-cmd="/help" data-i18n="help" data-i18n-title="help">❓ 帮助</button>
+      <button data-cmd="/model" class="mob-only" data-i18n="model" data-i18n-title="model">🧠 模型</button>
+      <button data-cmd="/theme" class="mob-only" data-i18n="theme" data-i18n-title="theme">🎨 主题</button>
+      <button id="btn-daynight-mob" class="mob-only" data-i18n-title="daynight">🌙</button>
+      <button id="btn-abort" class="abort hidden" data-i18n="abort" data-i18n-title="abort">⏹ 中断</button>
+    </div>
+
+    <footer id="composer" class="glass">
+      <textarea id="input" rows="1" data-i18n-placeholder="input-placeholder" placeholder="输入消息…（@ 引用文件 · / 命令）" autocomplete="off"></textarea>
+      <button id="btn-send" data-i18n="send">发送</button>
+    </footer>
+
+    <div id="modal-backdrop" class="hidden">
+      <div id="modal" class="glass">
+        <div id="modal-title"></div>
+        <div id="modal-filter" class="hidden"><input id="modal-filter-input" type="text" placeholder="过滤…"></div>
+        <div id="modal-body"></div>
+        <div id="modal-actions"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js?v=20"></script>
+</body>
+</html>
