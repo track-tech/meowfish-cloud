@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=26">
+  <link rel="stylesheet" href="/style.css?v=27">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -103,8 +103,21 @@
         </div>
       </div>
     </div>
+
+    <!-- 免提连续语音对话模式（OpenAI Realtime 式体验，DeepSeek + MiMo） -->
+    <div id="voice-mode-overlay" class="hidden">
+      <div id="voice-mode-card" class="glass">
+        <div id="voice-mode-title" data-i18n="voice-mode-title">语音对话</div>
+        <canvas id="voice-canvas" width="280" height="280"></canvas>
+        <div id="voice-status">…</div>
+        <div id="voice-transcript"></div>
+        <div id="voice-mode-actions">
+          <button class="modal-btn primary" id="voice-exit" data-i18n="voice-exit">退出语音对话</button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script src="/app.js?v=26"></script>
+  <script src="/app.js?v=27"></script>
 </body>
 </html>
