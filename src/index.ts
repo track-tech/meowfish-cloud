@@ -1,5 +1,6 @@
 import { BUILTIN_THEMES, findTheme } from './ui/themes-core.js';
 import { WebUi } from './webui.js';
+import { mimoAsr, mimoTts } from './llm/mimo.js';
 import { CfDriver } from './driver.js';
 import { MemoryStores } from './stores.js';
 
@@ -214,6 +215,45 @@ export class MeowFishApp {
       case 'toggle-pin':
         if (typeof body.id === 'string') this.state.waitUntil(driver.togglePin(body.id));
         return json({ ok: true });
+      case 'voice-stt': {
+        // 语音识别：浏览器上传 wav base64，MiMo key 由浏览器随请求头携带（零持久化）
+        const key = request.headers.get('x-mimo-key') || '';
+        const audio = typeof body.audio === 'string' ? body.audio : '';
+        if (!key || !audio) return json({ ok: false, error: '缺少 MiMo API Key 或音频' }, 400);
+        try {
+          const text = await mimoAsr(key, audio, { language: 'auto' });
+          return json({ ok: true, text });
+        } catch (e) {
+          return json({ ok: false, error: e instanceof Error ? e.message : '识别失败' }, 500);
+        }
+      }
+      case 'voice-tts': {
+        // 语音合成：SSE 流式返回 PCM16 base64 分片
+        const key = request.headers.get('x-mimo-key') || '';
+        const text = typeof body.text === 'string' ? body.text : '';
+        if (!key || !text) return json({ ok: false, error: '缺少 MiMo API Key 或文本' }, 400);
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              await mimoTts(key, text, { voice: 'mimo_default', stream: true }, (pcm) => {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ pcm })}\n\n`));
+              });
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            } catch (e) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: e instanceof Error ? e.message : '合成失败' })}\n\n`));
+            }
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
+        });
+      }
       case 'local-config':
         // 浏览器推送本地用户配置（模型/用户设定/SSH 凭据，存 localStorage）
         driver.applyLocalConfig(body.config);

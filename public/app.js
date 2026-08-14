@@ -20,6 +20,11 @@
       'confirm-del-session': '确定删除这个会话吗？',
       'confirm-del-sessions': '确定删除选中的 {n} 个会话吗？此操作不可恢复。',
       'confirm-title': '确认操作',
+      'voice': '语音回复', 'voice-on': '语音回复已开启：角色回复后自动朗读',
+      'voice-off': '语音回复已关闭',
+      'mic-hold': '按住说话（松开识别）', 'mic-listening': '正在聆听…松开结束',
+      'mic-working': '正在识别…', 'mic-no-key': '未配置 MiMo API Key：点「设置 → 实时语音（MiMo）」填写',
+      'mic-fail': '识别失败：', 'voice-fail': '朗读失败：', 'voice-play': '🔊 朗读',
       'daynight': '白日 / 暗夜切换（浅滩 ↔ 深海）',
       'time-now': '刚刚', 'time-min': ' 分钟前', 'time-hour': ' 小时前', 'time-yesterday': '昨天', 'time-day': '{m}月{d}日',
       'tooltips': {
@@ -43,6 +48,11 @@
       'confirm-del-session': 'Delete this session?',
       'confirm-del-sessions': 'Delete {n} selected sessions? This cannot be undone.',
       'confirm-title': 'Confirm',
+      'voice': 'Voice reply', 'voice-on': 'Voice reply on: assistant replies are read aloud',
+      'voice-off': 'Voice reply off',
+      'mic-hold': 'Hold to talk (release to transcribe)', 'mic-listening': 'Listening… release to finish',
+      'mic-working': 'Transcribing…', 'mic-no-key': 'MiMo API Key not set: Settings → Voice (MiMo)',
+      'mic-fail': 'Recognition failed: ', 'voice-fail': 'Read-aloud failed: ', 'voice-play': '🔊 Read',
       'daynight': 'Day / Night toggle (Shoal ↔ Deep Sea)',
       'time-now': 'just now', 'time-min': 'm ago', 'time-hour': 'h ago', 'time-yesterday': 'Yesterday', 'time-day': '{m}/{d}',
       'tooltips': {
@@ -966,6 +976,10 @@
         case 'config':
           // Worker 回推的配置变更 → 缓存到浏览器本地
           saveLocalConfig(m.config);
+          // 语音 key 同步：云端设置面板更新后立即生效
+          if (m.config && m.config.general && typeof m.config.general.mimoKey === 'string') {
+            speechKey = m.config.general.mimoKey;
+          }
           // 语言切换：服务端配置变更后应用并重载界面
           if (m.config && m.config.general && typeof m.config.general.lang === 'string' && m.config.general.lang !== LANG) {
             LANG = m.config.general.lang;
@@ -1046,6 +1060,203 @@
     };
   }
 
+  /* ---------- 实时语音（MiMo ASR/TTS） ---------- */
+
+  var VOICE_KEY = 'meowfish-voice';       // localStorage：语音回复开关
+  var voiceSpeak = false;                 // 回复后自动朗读
+  var voiceBusy = false;                  // 朗读中（避免重叠）
+  var micRec = null;                      // {ctx, processor, chunks, stream, stop}
+  var audioCtx = null;                    // 播放用 AudioContext（首次用户手势时创建）
+  var speechKey = '';                     // MiMo key：请求头带上（本地服务端 secrets 兜底）
+
+  try {
+    var _lc = loadLocalConfig();
+    if (_lc && _lc.general && typeof _lc.general.mimoKey === 'string') speechKey = _lc.general.mimoKey;
+  } catch (e) { /* ignore */ }
+
+  function voiceHeaders() {
+    var h = { 'Content-Type': 'application/json' };
+    if (speechKey) h['x-mimo-key'] = speechKey;
+    return h;
+  }
+
+  /* ---- 语音回复开关 ---- */
+  function setVoiceSpeak(on) {
+    voiceSpeak = on;
+    try { localStorage.setItem(VOICE_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+    $('btn-voice').classList.toggle('on', on);
+    $('btn-voice').textContent = (on ? '🔊 ' : '🔇 ') + t('voice');
+    setStatus(on ? 'success' : 'idle', on ? t('voice-on') : t('voice-off'));
+  }
+
+  /* ---- 朗读（TTS：SSE 流式 PCM16 → AudioContext 播放） ---- */
+  function speakText(text) {
+    if (voiceBusy) return; // 上一次朗读未结束，跳过（避免串音）
+    voiceBusy = true;
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { voiceBusy = false; return; }
+    var chunks = []; // {buf: ArrayBuffer, sampleRate}
+    fetch(withToken('/ui/voice-tts'), {
+      method: 'POST',
+      headers: voiceHeaders(),
+      body: JSON.stringify({ text: text }),
+    }).then(function (res) {
+      if (!res || !res.ok || !res.body) throw new Error((t('voice-fail') + 'HTTP ' + (res ? res.status : '?')));
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buf = '';
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) { flushSse(); return; }
+          buf += decoder.decode(r.value, { stream: true });
+          var idx;
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            var frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            frame.split('\n').forEach(function (line) {
+              if (!line.startsWith('data:')) return;
+              var payload = line.slice(5).trim();
+              if (!payload || payload === '[DONE]') return;
+              try {
+                var m = JSON.parse(payload);
+                if (m.error) throw new Error(m.error);
+                if (m.pcm) chunks.push(m.pcm);
+              } catch (e) { /* skip */ }
+            });
+          }
+          return pump();
+        });
+      }
+      function flushSse() {
+        // 全部 PCM 到位后播放（每块 24kHz PCM16 拼接）
+        try {
+          var all = chunks.join('');
+          if (!all) throw new Error(t('voice-fail'));
+          var bin = atob(all);
+          var pcm = new Int16Array(bin.length / 2);
+          for (var i = 0; i < pcm.length; i++) pcm[i] = (bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8)) << 16 >> 16;
+          var buffer = audioCtx.createBuffer(1, pcm.length, 24000);
+          var data = buffer.getChannelData(0);
+          for (var j = 0; j < pcm.length; j++) data[j] = pcm[j] / 32768;
+          var src = audioCtx.createBufferSource();
+          src.buffer = buffer;
+          src.connect(audioCtx.destination);
+          src.onended = function () { voiceBusy = false; };
+          src.start();
+        } catch (e) {
+          voiceBusy = false;
+          pushToast(t('voice-fail') + (e instanceof Error ? e.message : ''));
+        }
+      }
+      return pump().catch(function () { voiceBusy = false; });
+    }).catch(function (e) {
+      voiceBusy = false;
+      pushToast(t('voice-fail') + (e instanceof Error ? e.message : ''));
+    });
+  }
+
+  /* ---- 按住说话（录音 → WAV → 识别） ---- */
+  function startMic() {
+    if (micRec) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      pushToast(t('mic-fail') + 'getUserMedia unavailable');
+      return;
+    }
+    setStatus('tool', t('mic-listening'));
+    var ctx = null;
+    var processor = null;
+    var chunks = [];
+    var stream = null;
+    var stopped = false;
+    var promise = navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(function (s) {
+        stream = s;
+        // 16kHz 单声道采集（与 MiMo ASR 匹配）
+        ctx = new AudioContext({ sampleRate: 16000 });
+        var src = ctx.createMediaStreamSource(s);
+        processor = ctx.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = function (e) {
+          if (stopped) return;
+          var input = e.inputBuffer.getChannelData(0);
+          chunks.push(new Float32Array(input));
+        };
+        src.connect(processor);
+        processor.connect(ctx.destination);
+      })
+      .catch(function (e) {
+        pushToast(t('mic-fail') + (e instanceof Error ? e.message : String(e)));
+        setStatus('idle');
+      });
+    micRec = {
+      stop: function () {
+        if (stopped) return;
+        stopped = true;
+        promise.then(function () {
+          try { processor.disconnect(); } catch (e) { /* ignore */ }
+          try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
+          try { ctx.close(); } catch (e) { /* ignore */ }
+          micRec = null;
+          var total = 0;
+          chunks.forEach(function (c) { total += c.length; });
+          if (!total) {
+            setStatus('idle');
+            return;
+          }
+          var pcm = new Float32Array(total);
+          var off = 0;
+          chunks.forEach(function (c) { pcm.set(c, off); off += c.length; });
+          // 转 16-bit WAV（header + data）
+          var wav = encodeWav(pcm, 16000);
+          setStatus('tool', t('mic-working'));
+          fetch(withToken('/ui/voice-stt'), {
+            method: 'POST',
+            headers: voiceHeaders(),
+            body: JSON.stringify({ audio: wav }),
+          }).then(function (res) {
+            return res && res.ok ? res.json() : Promise.reject(new Error(res ? res.status : ''));
+          }).then(function (j) {
+            setStatus('idle');
+            if (j && j.text) {
+              inputEl.value += (inputEl.value && !inputEl.value.endsWith(' ') ? ' ' : '') + j.text;
+              inputEl.focus();
+              // 识别到文本后自动发送（无需再点发送）
+              sendInput();
+            }
+          }).catch(function (e) {
+            setStatus('idle');
+            pushToast(t('mic-fail') + (e instanceof Error ? e.message : String(e)));
+          });
+        });
+      },
+    };
+  }
+
+  function encodeWav(pcm, sampleRate) {
+    var n = pcm.length;
+    var buf = new ArrayBuffer(44 + n * 2);
+    var dv = new DataView(buf);
+    function wstr(off, s) { for (var i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)); }
+    wstr(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); wstr(8, 'WAVE');
+    wstr(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    wstr(36, 'data'); dv.setUint32(40, n * 2, true);
+    for (var i = 0; i < n; i++) {
+      var v = Math.max(-1, Math.min(1, pcm[i]));
+      dv.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+    }
+    var bin = '';
+    var bytes = new Uint8Array(buf);
+    for (var j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j]);
+    return btoa(bin);
+  }
+
+  function pushToast(msg) {
+    // 轻量提示：复用状态条，稍后收起
+    setStatus('error', msg);
+  }
+
   /* ---------- 交互 ---------- */
 
   $('btn-send').addEventListener('click', sendInput);
@@ -1055,6 +1266,58 @@
       sendInput();
     }
   });
+
+  /* ---- 语音：按住说话 + 语音回复开关 ---- */
+  var micBtn = $('btn-mic');
+  var micDown = false;
+  function micPress(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    micDown = true;
+    startMic();
+  }
+  function micRelease() {
+    if (!micDown) return;
+    micDown = false;
+    if (micRec) micRec.stop();
+  }
+  micBtn.addEventListener('pointerdown', micPress);
+  micBtn.addEventListener('pointerup', micRelease);
+  micBtn.addEventListener('pointercancel', micRelease);
+  micBtn.addEventListener('pointerleave', micRelease);
+  micBtn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  // 触屏：长按开始、松开结束
+  micBtn.addEventListener('touchstart', micPress, { passive: false });
+  micBtn.addEventListener('touchend', micRelease);
+  micBtn.addEventListener('touchcancel', micRelease);
+
+  var voiceBtn = $('btn-voice');
+  voiceBtn.addEventListener('click', function () {
+    setVoiceSpeak(!voiceSpeak);
+  });
+  // 初始化语音回复开关状态
+  try {
+    setVoiceSpeak(localStorage.getItem(VOICE_KEY) === '1');
+  } catch (e) { setVoiceSpeak(false); }
+
+  // 回复完成后自动朗读（状态回到 idle 时读取最后一条 assistant 消息）
+  var lastSpeakText = '';
+  var origSetStatus = setStatus;
+  setStatus = function (status, text) {
+    origSetStatus(status, text);
+    if (voiceSpeak && status === 'idle' && !voiceBusy) {
+      var msgs = messagesEl.querySelectorAll('.msg.assistant .bubble');
+      if (msgs.length) {
+        var lastMsg = msgs[msgs.length - 1];
+        var raw = lastMsg.getAttribute('data-raw') || '';
+        var txt = raw || lastMsg.textContent || '';
+        txt = txt.replace(/\s+/g, ' ').trim();
+        if (txt && txt !== lastSpeakText) {
+          lastSpeakText = txt;
+          setTimeout(function () { speakText(txt); }, 300);
+        }
+      }
+    }
+  };
   inputEl.addEventListener('keyup', function (e) {
     if (e.key === '@') post('/ui/command', { line: '/at' });
   });

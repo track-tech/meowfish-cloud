@@ -1575,6 +1575,7 @@ export class CfDriver {
         { label: L === 'en' ? 'Color theme' : '配色主题', detail: this.config.general.theme, value: 'theme' },
         { label: L === 'en' ? 'Kaomoji style' : '颜文字风格', detail: this.config.general.kaomojiStyle, value: 'kaomoji' },
         { label: L === 'en' ? 'Computer access' : '电脑权限', detail: this.config.general.tools ? (L === 'en' ? 'on' : '开（SSH 远程服务器工具）') : L === 'en' ? 'off' : '关（纯聊天）', value: 'tools' },
+        { label: L === 'en' ? 'Voice (MiMo)' : '实时语音（MiMo）', detail: this.config.general.mimoKey ? '✓ key' : L === 'en' ? 'set API key' : '未设置 API key', value: 'voice' },
         { label: 'Language / 语言', detail: L === 'en' ? 'English' : '中文', value: 'lang' },
         { label: L === 'en' ? 'About' : '关于', detail: APP_VERSION, value: 'about' },
       ],
@@ -1598,6 +1599,9 @@ export class CfDriver {
           case 'tools':
             this.toggleTools();
             break;
+          case 'voice':
+            this.openVoiceSettings();
+            break;
           case 'lang':
             this.openLangPicker();
             break;
@@ -1605,6 +1609,28 @@ export class CfDriver {
             void this.command('/about');
             break;
         }
+      },
+    });
+  }
+
+  /** 语音设置：MiMo API Key（存浏览器 localStorage，云端零持久化） */
+  private openVoiceSettings(): void {
+    const L = this.lang;
+    this.ui.openForm({
+      title: L === 'en' ? 'Voice (MiMo)' : '实时语音（MiMo）',
+      fields: [
+        { label: 'API Key', value: this.config.general.mimoKey ?? '', placeholder: 'platform.xiaomimimo.com 申请的 key' },
+      ],
+      onSubmit: (values) => {
+        const key = (values[0] ?? '').trim();
+        if (key) this.config.general.mimoKey = key;
+        else delete this.config.general.mimoKey;
+        void this.saveConfig();
+        this.ui.pushSystem(
+          key
+            ? (L === 'en' ? 'MiMo API Key saved (local browser only)' : 'MiMo API Key 已保存（仅存于本浏览器）')
+            : (L === 'en' ? 'MiMo API Key cleared' : 'MiMo API Key 已清除'),
+        );
       },
     });
   }

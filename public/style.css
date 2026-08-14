@@ -936,6 +936,39 @@ html.light #sidebar { background: rgba(255, 255, 255, 0.78); }
   padding: 10px 22px;
 }
 
+/* 麦克风（按住说话） */
+.mic-btn {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg);
+  font-size: 17px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.mic-btn:hover { background: rgba(var(--accent-rgb), 0.14); }
+.mic-btn:active, .mic-btn.recording {
+  background: rgba(var(--error-rgb, 243, 139, 168), 0.22);
+  border-color: var(--error);
+  transform: scale(1.08);
+}
+
+/* 语音回复开关（快捷栏） */
+#quickbar button.on {
+  background: rgba(var(--accent-rgb), 0.22);
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
 /* ---- 弹窗 ---- */
 #modal-backdrop {
   position: fixed;
