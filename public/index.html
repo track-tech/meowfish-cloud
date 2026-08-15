@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=39">
+  <link rel="stylesheet" href="/style.css?v=40">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -17,13 +17,17 @@
     <button id="btn-newchat" class="newchat-btn" data-i18n="new-chat">＋ 新建对话</button>
     <div class="session-region">
       <div class="session-list-title" data-i18n="recent-sessions">最近会话</div>
+      <input id="session-search" type="text" placeholder="搜索会话…" autocomplete="off">
       <div id="session-list"></div>
     </div>
     <div id="manage-bar" class="hidden">
       <label class="manage-all"><input type="checkbox" id="manage-select-all"> <span data-i18n="select-all">全选</span></label>
       <span class="spacer"></span>
+      <button id="btn-export-sessions">导出</button>
+      <button id="btn-import-sessions">导入</button>
       <button id="btn-manage-cancel" data-i18n="cancel">取消</button>
       <button id="btn-manage-delete" data-i18n="delete-selected">删除所选</button>
+      <input id="sessions-import-file" type="file" accept="application/json" class="hidden">
     </div>
   </aside>
   <div id="sidebar-backdrop" class="hidden"></div>
@@ -132,9 +136,18 @@
       <button id="ssh-term-new" class="pill" type="button" title="新建连接">＋</button>
       <span id="ssh-term-status" class="ssh-term-status">未连接</span>
       <span class="spacer"></span>
+      <button id="ssh-term-send" class="pill" type="button" title="把最近终端输出发给喵鱼">发给喵鱼</button>
+      <button id="ssh-term-find" class="pill" type="button">查找</button>
+      <button id="ssh-term-reconnect" class="pill" type="button">重连</button>
       <button id="ssh-term-clear" class="pill" type="button" title="清屏">清屏</button>
       <button id="ssh-term-reconfig" class="pill" type="button">连接设置</button>
       <button id="ssh-term-exit" class="pill" type="button">退出</button>
+    </div>
+    <div id="ssh-term-findbar" class="hidden">
+      <input id="ssh-term-find-input" type="text" placeholder="在当前标签输出中搜索…">
+      <button id="ssh-term-find-prev" type="button">↑ 上一个</button>
+      <button id="ssh-term-find-next" type="button">↓ 下一个</button>
+      <button id="ssh-term-find-close" type="button">×</button>
     </div>
     <div id="ssh-term-screen">
       <pre id="ssh-term-output" tabindex="-1"></pre>
@@ -142,6 +155,6 @@
     <textarea id="ssh-term-input" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
   </div>
 
-  <script src="/app.js?v=39"></script>
+  <script src="/app.js?v=40"></script>
 </body>
 </html>

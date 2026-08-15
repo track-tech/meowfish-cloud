@@ -186,6 +186,20 @@ html.light #sidebar { background: rgba(255, 255, 255, 0.78); }
   padding: 4px 8px 6px;
 }
 
+#session-search {
+  flex: none;
+  margin: 0 8px 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--fg, #e6edf3);
+  font-size: 13px;
+  outline: none;
+}
+#session-search:focus { border-color: rgba(var(--accent-rgb), 0.55); }
+html.light #session-search { background: rgba(255, 255, 255, 0.7); color: #1f2328; }
+
 #session-list {
   display: flex;
   flex-direction: column;
@@ -1733,6 +1747,52 @@ html, body {
 }
 .ssh-term-tab .tab-close:hover { color: #f85149; }
 #ssh-term-new { font-size: 16px; line-height: 1; padding: 4px 10px; }
+#ssh-term-findbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #30363d;
+  background: #161b22;
+  flex: none;
+}
+#ssh-term-findbar input {
+  flex: 1;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+#ssh-term-findbar button {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+#ssh-term-output mark {
+  background: rgba(250, 204, 21, 0.35);
+  color: #fff;
+  border-radius: 2px;
+}
+html.light #ssh-term-output mark { color: #1f2328; }
+html.light #ssh-term-findbar { background: #fff; border-color: #d0d7de; }
+html.light #ssh-term-findbar input { background: #f6f8fa; color: #1f2328; border-color: #d0d7de; }
+html.light #ssh-term-findbar button { background: #f6f8fa; color: #1f2328; border-color: #d0d7de; }
+.term-run-btn {
+  flex: none;
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.term-run-btn:hover { background: rgba(var(--accent-rgb), 0.24); }
 #ssh-term-screen {
   flex: 1;
   overflow: auto;

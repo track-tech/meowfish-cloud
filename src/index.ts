@@ -333,6 +333,10 @@ async function sshTermUpgrade(request: Request): Promise<Response> {
     } catch {
       return;
     }
+    if (msg.type === 'ping') {
+      send({ type: 'pong' });
+      return;
+    }
     if (msg.type === 'connect') {
       if (term) return;
       void (async () => {
