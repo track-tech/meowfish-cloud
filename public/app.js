@@ -1372,9 +1372,9 @@
       }
       lastVoiceText = text;
       $('vv-user-line').textContent = text;
-      // 自动发送（与输入框同路：/ 开头走命令）
+      // 自动发送（与输入框同路：/ 开头走命令；语音模式消息带 voice 标记，服务端据此注入语音规则）
       if (text.charAt(0) === '/') post('/ui/command', { line: text });
-      else post('/ui/send', { text: text });
+      else post('/ui/send', { text: text, voice: true });
       setVoiceStatus(t('voice-thinking'), 'thinking');
     }).catch(function (e) {
       if (vc) vc.busy = false;

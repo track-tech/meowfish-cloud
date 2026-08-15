@@ -565,7 +565,9 @@ export class CfDriver {
 
   /* ---------- 主流程 ---------- */
 
-  async send(text: string): Promise<void> {
+  async send(text: string, voice = false): Promise<void> {
+    // 消息级语音标记：语音识别发送时带上（DO 会被回收，不能只依赖 /voice 命令的易失状态）
+    if (voice) this.voiceChat = true;
     if (this.busy || !this.session) return;
     if (this.toolsOn && text.startsWith('!')) {
       await this.directBash(text.slice(1).trim());
