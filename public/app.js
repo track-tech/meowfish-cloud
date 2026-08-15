@@ -482,6 +482,16 @@
     // 浅色主题：切换 light 类，玻璃样式从「白色透亮」换成「深色投影」体系
     var light = isLightHex(t.bg);
     document.documentElement.classList.toggle('light', light);
+    // 玻璃配色随主题明暗切换（深色主题下若仍用 :root 的半透明白 → 上下栏/弹窗亮得刺眼）
+    if (light) {
+      r.setProperty('--glass-bg', 'rgba(255, 255, 255, 0.6)');
+      r.setProperty('--glass-border', 'rgba(0, 0, 0, 0.14)');
+      r.setProperty('--glass-shadow', '0 8px 28px rgba(90, 75, 60, 0.16)');
+    } else {
+      r.setProperty('--glass-bg', 'rgba(16, 22, 38, 0.66)');
+      r.setProperty('--glass-border', 'rgba(255, 255, 255, 0.12)');
+      r.setProperty('--glass-shadow', '0 10px 32px rgba(0, 0, 0, 0.5)');
+    }
     // 白日/暗夜按钮图标跟随当前主题明暗（顶栏 + 移动端快捷栏两处）
     var lightIcon = light ? '☀️' : '🌙';
     var dn = $('btn-daynight');

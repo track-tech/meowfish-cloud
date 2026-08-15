@@ -1388,18 +1388,45 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 #voice-view .vv-line:empty { display: none; }
 
-/* 语音模式开启时快捷栏按钮高亮 */
+/* 语音对话模式开启时快捷栏按钮高亮 */
 #quickbar button.on, #btn-voice.on {
   background: rgba(var(--accent-rgb), 0.22);
   color: var(--accent);
   border-color: rgba(var(--accent-rgb), 0.45);
 }
 
-/* 语音对话模式：隐藏文字对话界面（消息区/快捷栏/输入框），全屏沉浸 */
+/* 实时语音按钮：常驻强调色，一眼可找；开启后加脉冲光环 */
+#btn-voice {
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2), rgba(var(--user-rgb), 0.14));
+  border-color: rgba(var(--accent-rgb), 0.4);
+  color: var(--accent);
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.18);
+}
+#btn-voice:hover {
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.3), rgba(var(--user-rgb), 0.22));
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+#btn-voice.on {
+  background: linear-gradient(135deg, var(--accent), rgba(var(--user-rgb), 0.9));
+  color: #0a0e1a;
+  border-color: transparent;
+  animation: voicePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes voicePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.45); }
+  50% { box-shadow: 0 0 0 7px rgba(var(--accent-rgb), 0); }
+}
+
+/* 语音对话模式：隐藏文字对话界面（消息区/快捷栏/输入框/侧边栏），全屏沉浸 */
 body.voice-active #messages,
 body.voice-active #quickbar,
 body.voice-active #composer,
-body.voice-active #statusbar {
+body.voice-active #statusbar,
+body.voice-active #sidebar,
+body.voice-active #sidebar-backdrop {
   display: none !important;
 }
 
