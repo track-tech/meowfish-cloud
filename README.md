@@ -10,7 +10,8 @@ UI / 聊天 / 角色扮演 / 模型代理跑在 Cloudflare Worker——**云端�
 
 - 🎭 角色扮演（角色卡 V2）+ 聊天 + 会话管理，全部功能与本地版一致
 - 🛠️ **Worker 内置 SSH 客户端**：零依赖实现 X25519 / Ed25519 / AES-256-GCM，`/ssh` 配置后直接控制远程服务器
-- 🌐 联网搜索（Bing / Yandex / DuckDuckGo，Worker 直连，免授权）
+- 💻 **Web SSH 终端**：浏览器内交互式终端（WebSocket ↔ SSH shell/PTY），本地版与云端版通用
+- 🌐 联网搜索（Bing / 百度 / 搜狗优先，Google / Brave 补充，多引擎聚合去重，Worker 直连，免授权）
 - 🔒 **云端零持久化**：不绑定任何数据库，数据只在你自己的浏览器里
 - 👥 多人公用：按 deviceId 隔离，互不可见
 - 💬 双语界面（中文 / English）· 🌗 白日/暗夜主题 · 📱 移动端适配
@@ -50,9 +51,10 @@ npx wrangler dev --port 8787   # 打开 http://127.0.0.1:8787
 
 ```
 src/
-├── index.ts          Worker 入口（SSE / /ui/* / 静态，按 deviceId 隔离内存态）
+├── index.ts          Worker 入口（SSE / /ui/* / 静态，按 deviceId 隔离内存态；/ssh-term WebSocket）
 ├── driver.ts         云端驱动（聊天/命令/工具转发/权限确认，sync 协议）
-├── ssh.ts            Worker 内置 SSH 客户端（X25519/Ed25519/AES-256-GCM，零依赖）
+├── ssh.ts            Worker 内置 SSH 客户端（X25519/Ed25519/AES-256-GCM，零依赖；exec + shell）
+├── socket.ts         cloudflare:sockets TCP 传输适配
 ├── stores.ts         纯内存存储（云端零持久化）
 ├── webui.ts          事件协议（与本地 WebUI 同源）
 ├── llm/ rp/ core/ ui/ 从主项目复制的纯模块

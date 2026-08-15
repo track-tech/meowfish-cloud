@@ -1681,6 +1681,66 @@ html, body {
 /* 管理模式栏出现动画 */
 #manage-bar:not(.hidden) { animation: barIn 0.2s ease both; }
 
+/* ---- Web SSH 终端 ---- */
+#ssh-term-view {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: #0d1117;
+  color: #c9d1d9;
+}
+#ssh-term-view .ssh-term-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #30363d;
+  background: #161b22;
+  flex: none;
+}
+#ssh-term-view .ssh-term-title { font-weight: 700; color: #e6edf3; }
+#ssh-term-view .ssh-term-status { font-size: 0.85rem; color: #8b949e; }
+#ssh-term-view .ssh-term-status.on { color: #3fb950; }
+#ssh-term-view .ssh-term-status.err { color: #f85149; }
+#ssh-term-screen {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 12px;
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-size: 14px;
+  line-height: 1.35;
+}
+#ssh-term-output {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  min-height: 100%;
+  font: inherit;
+  color: inherit;
+}
+#ssh-term-input {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  opacity: 0;
+  width: 2px;
+  height: 2px;
+}
+/* ANSI SGR 颜色 */
+.c30 { color: #111827; } .c31 { color: #f87171; } .c32 { color: #4ade80; } .c33 { color: #facc15; }
+.c34 { color: #60a5fa; } .c35 { color: #c084fc; } .c36 { color: #22d3ee; } .c37 { color: #e5e7eb; }
+.c90 { color: #6b7280; } .c91 { color: #fca5a5; } .c92 { color: #86efac; } .c93 { color: #fde047; }
+.c94 { color: #93c5fd; } .c95 { color: #d8b4fe; } .c96 { color: #67e8f9; } .c97 { color: #f9fafb; }
+.b { font-weight: 700; }
+html.light #ssh-term-view { background: #f6f8fa; color: #1f2328; }
+html.light #ssh-term-view .ssh-term-top { background: #fff; border-color: #d0d7de; }
+html.light #ssh-term-view .ssh-term-title { color: #1f2328; }
+html.light #ssh-term-output .c30 { color: #111827; } html.light #ssh-term-output .c37 { color: #1f2328; }
+html.light #ssh-term-output .c90 { color: #57606a; }
+
+
 @keyframes barIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }

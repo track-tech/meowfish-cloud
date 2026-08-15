@@ -1,16 +1,23 @@
-import { connect, type Socket } from 'cloudflare:sockets';
-
 /**
- * Cloudflare Worker 直连 SSH 客户端（零依赖）：
- * - TCP：cloudflare:sockets connect()
+ * SSH 客户端核心（传输无关、零依赖）：
+ * - TCP 传输由调用方注入（Cloudflare Worker 用 cloudflare:sockets；Node 本地版用 node:net）
  * - KEX：curve25519-sha256（WebCrypto X25519）
  * - 主机密钥：ssh-ed25519（WebCrypto Ed25519 验签，SHA256 指纹 TOFU）
  * - 加密：aes256-gcm@openssh.com / aes128-gcm（RFC 5647 SSH AEAD）
  * - 认证：password / keyboard-interactive / ssh-ed25519 公钥（OpenSSH 私钥格式解析）
- * - 通道：session + exec 单命令
+ * - 通道：session + exec 单命令 / shell 交互终端（pty-req + shell）
  *
  * 限制：服务器需支持 curve25519 KEX、ssh-ed25519 主机密钥与 GCM AEAD（OpenSSH 7.x+ 默认均支持）。
  */
+
+/** 传输抽象：Web Streams 形式 TCP 连接（Worker socket 与 Node net.Socket 都可适配） */
+export interface SshTcp {
+  readable: ReadableStream<Uint8Array>;
+  writable: WritableStream<Uint8Array>;
+  close(): void;
+}
+
+export type SshTcpFactory = (host: string, port: number) => SshTcp;
 
 export type SshAuth = { kind: 'password'; password: string } | { kind: 'key'; privateKey: string };
 
@@ -26,6 +33,8 @@ export interface SshConfig {
   signal?: AbortSignal;
   /** 诊断模式：失败时附带回包 hex（调试用） */
   debug?: boolean;
+  /** TCP 传输工厂（必需：Worker 传 cloudflareTcp，Node 传 nodeTcp；不传时连接阶段报错） */
+  transport?: SshTcpFactory;
 }
 
 export interface SshExecResult {
@@ -224,7 +233,7 @@ function parseOpenSshPrivateKey(pem: string): { seed: OwnedBytes } {
 type PacketHandler = (payload: Uint8Array) => void;
 
 class SshSession {
-  private sock: Socket;
+  private sock: SshTcp;
   readonly reader: ByteReader;
   readonly writer: WritableStreamDefaultWriter<Uint8Array>;
   private c2sSeq = 0;
@@ -258,7 +267,8 @@ class SshSession {
   dbgF: Bytes = new Uint8Array(0);
 
   constructor(cfg: SshConfig) {
-    this.sock = connect({ hostname: cfg.host, port: cfg.port }, { secureTransport: 'off' });
+    if (!cfg.transport) throw new Error('SSH 配置缺少 transport（Worker 用 cloudflareTcp / Node 用 nodeTcp）');
+    this.sock = cfg.transport(cfg.host, cfg.port);
     this.reader = new ByteReader(this.sock.readable.getReader());
     this.reader.start();
     this.writer = this.sock.writable.getWriter();
@@ -659,6 +669,18 @@ function normalizeError(msg: string): Error {
 }
 
 async function handshakeAndExec(sess: SshSession, cfg: SshConfig, command: string, timeoutMs: number): Promise<SshExecResult> {
+  const { fingerprint, step } = await handshake(sess, cfg, timeoutMs);
+  let phase = 'exec';
+  try {
+    return await execChannel(sess, command, step, fingerprint);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`[${phase}] ${msg}`);
+  }
+}
+
+/** TCP 连接 + KEX + NEWKEYS + 认证（exec 与 shell 通道共用） */
+async function handshake(sess: SshSession, cfg: SshConfig, timeoutMs: number): Promise<{ fingerprint: string; step: number }> {
   // 认证步可能较慢（服务器密码防爆破延迟可达 10s+），每步至少 10s；包一到立即继续，上限只兜底
   const step = Math.max(10_000, Math.floor(timeoutMs / 3));
   // 阶段标记：失败时把「断在哪一步」带进错误信息（诊断用）
@@ -712,98 +734,96 @@ async function handshakeAndExec(sess: SshSession, cfg: SshConfig, command: strin
     // 严格 KEX（双方都声明 kex-strict-*-v00@openssh.com 时启用）：NEWKEYS 后序列号归零
     const strictKex = sLists[0]!.includes('kex-strict-s-v00@openssh.com');
 
-  /* 3. X25519 + KEX_ECDH_REPLY */
-  const pair = (await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits'])) as unknown as { publicKey: SubtleKey; privateKey: SubtleKey };
-  const eRaw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
-  await sess.send(30, str(eRaw));
-  phase = 'kex-reply';
-  const reply = await sess.waitFor(31, step);
+    /* 3. X25519 + KEX_ECDH_REPLY */
+    const pair = (await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits'])) as unknown as { publicKey: SubtleKey; privateKey: SubtleKey };
+    const eRaw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+    await sess.send(30, str(eRaw));
+    phase = 'kex-reply';
+    const reply = await sess.waitFor(31, step);
 
-  let off = 0;
-  const readReplyStr = (): Uint8Array => {
-    const len = readU32(reply, off);
-    off += 4;
-    const s = reply.slice(off, off + len);
-    off += len;
-    return s;
-  };
-  const kS = readReplyStr();
-  const f = readReplyStr();
-  const sigBlob = readReplyStr();
+    let off = 0;
+    const readReplyStr = (): Uint8Array => {
+      const len = readU32(reply, off);
+      off += 4;
+      const s = reply.slice(off, off + len);
+      off += len;
+      return s;
+    };
+    const kS = readReplyStr();
+    const f = readReplyStr();
+    const sigBlob = readReplyStr();
 
-  const kAlgLen = readU32(kS);
-  const kAlg = TD.decode(kS.slice(4, 4 + kAlgLen));
-  const kKeyLen = readU32(kS, 4 + kAlgLen);
-  const hostKey = new Uint8Array(kS.slice(8 + kAlgLen, 8 + kAlgLen + kKeyLen));
-  if (kAlg !== 'ssh-ed25519') throw new Error(`服务器主机密钥算法 ${kAlg} 暂不支持（仅支持 ssh-ed25519 主机密钥）`);
+    const kAlgLen = readU32(kS);
+    const kAlg = TD.decode(kS.slice(4, 4 + kAlgLen));
+    const kKeyLen = readU32(kS, 4 + kAlgLen);
+    const hostKey = new Uint8Array(kS.slice(8 + kAlgLen, 8 + kAlgLen + kKeyLen));
+    if (kAlg !== 'ssh-ed25519') throw new Error(`服务器主机密钥算法 ${kAlg} 暂不支持（仅支持 ssh-ed25519 主机密钥）`);
 
-  const fingerprint = `SHA256:${base64NoPad(await sha256(kS))}`;
-  if (cfg.expectedFingerprint && cfg.expectedFingerprint !== fingerprint) {
-    throw new Error(`主机指纹不匹配！预期 ${cfg.expectedFingerprint}，实际 ${fingerprint}（可能是中间人攻击或服务器重装）`);
-  }
+    const fingerprint = `SHA256:${base64NoPad(await sha256(kS))}`;
+    if (cfg.expectedFingerprint && cfg.expectedFingerprint !== fingerprint) {
+      throw new Error(`主机指纹不匹配！预期 ${cfg.expectedFingerprint}，实际 ${fingerprint}（可能是中间人攻击或服务器重装）`);
+    }
 
-  const serverPub = await crypto.subtle.importKey('raw', new Uint8Array(f), { name: 'X25519' }, false, []);
-  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: 'X25519', public: serverPub }, pair.privateKey, 256));
-  // 交换哈希（paramiko/babeld 实测语义，已用真实服务器签名验证）：
-  // - 所有字段均为带长度前缀的字符串（含版本串）
-  // - I_C / I_S 是完整 KEXINIT 消息（含消息类型字节 0x14）
-  // - K 为完整 mpint 编码（字节按大端整数解释，去前导零，最高位补零）
-  const K = str(mpintFromBytes(shared));
-  const H = await sha256(
-    str(TE.encode(CLIENT_VERSION)),
-    str(serverBanner),
-    str(concat(new Uint8Array([20]), kexInit)),
-    str(concat(new Uint8Array([20]), serverKex)),
-    str(kS),
-    str(eRaw),
-    str(f),
-    K,
-  );
+    const serverPub = await crypto.subtle.importKey('raw', new Uint8Array(f), { name: 'X25519' }, false, []);
+    const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: 'X25519', public: serverPub }, pair.privateKey, 256));
+    // 交换哈希（paramiko/babeld 实测语义，已用真实服务器签名验证）：
+    // - 所有字段均为带长度前缀的字符串（含版本串）
+    // - I_C / I_S 是完整 KEXINIT 消息（含消息类型字节 0x14）
+    // - K 为完整 mpint 编码（字节按大端整数解释，去前导零，最高位补零）
+    const K = str(mpintFromBytes(shared));
+    const H = await sha256(
+      str(TE.encode(CLIENT_VERSION)),
+      str(serverBanner),
+      str(concat(new Uint8Array([20]), kexInit)),
+      str(concat(new Uint8Array([20]), serverKex)),
+      str(kS),
+      str(eRaw),
+      str(f),
+      K,
+    );
 
-  const sigAlgLen = readU32(sigBlob);
-  const sigAlg = TD.decode(sigBlob.slice(4, 4 + sigAlgLen));
-  const sigLen = readU32(sigBlob, 4 + sigAlgLen);
-  const sig = new Uint8Array(sigBlob.slice(8 + sigAlgLen, 8 + sigAlgLen + sigLen));
-  if (sigAlg !== 'ssh-ed25519' && sigAlg !== '') throw new Error(`不支持的主机签名算法: ${sigAlg}`);
-  const hostPub = await crypto.subtle.importKey('raw', hostKey, { name: 'Ed25519' }, false, ['verify']);
-  if (!(await crypto.subtle.verify({ name: 'Ed25519' }, hostPub, sig, H))) {
-    const dbg = cfg.debug
-      ? ` dbg={H:${hex(H)},VS:${hex(serverBanner)},IC:${hex(kexInit)},IS:${hex(serverKex)},KS:${hex(kS)},e:${hex(eRaw)},f:${hex(f)},K:${hex(shared)},sig:${hex(sig)}}`
-      : '';
-    throw new Error(`主机签名验证失败（指纹 ${fingerprint}，可能被中间人攻击）${dbg}`);
-  }
+    const sigAlgLen = readU32(sigBlob);
+    const sigAlg = TD.decode(sigBlob.slice(4, 4 + sigAlgLen));
+    const sigLen = readU32(sigBlob, 4 + sigAlgLen);
+    const sig = new Uint8Array(sigBlob.slice(8 + sigAlgLen, 8 + sigAlgLen + sigLen));
+    if (sigAlg !== 'ssh-ed25519' && sigAlg !== '') throw new Error(`不支持的主机签名算法: ${sigAlg}`);
+    const hostPub = await crypto.subtle.importKey('raw', hostKey, { name: 'Ed25519' }, false, ['verify']);
+    if (!(await crypto.subtle.verify({ name: 'Ed25519' }, hostPub, sig, H))) {
+      const dbg = cfg.debug
+        ? ` dbg={H:${hex(H)},VS:${hex(serverBanner)},IC:${hex(kexInit)},IS:${hex(serverKex)},KS:${hex(kS)},e:${hex(eRaw)},f:${hex(f)},K:${hex(shared)},sig:${hex(sig)}}`
+        : '';
+      throw new Error(`主机签名验证失败（指纹 ${fingerprint}，可能被中间人攻击）${dbg}`);
+    }
 
-  sess.sessionId = H;
-  sess.dbgH = H;
-  sess.dbgK = K;
-  sess.dbgShared = shared;
-  sess.dbgERaw = eRaw;
-  sess.dbgF = f;
+    sess.sessionId = H;
+    sess.dbgH = H;
+    sess.dbgK = K;
+    sess.dbgShared = shared;
+    sess.dbgERaw = eRaw;
+    sess.dbgF = f;
 
-  /* 4. NEWKEYS：发完即切 c2s 加密；收到对端 NEWKEYS 后再切 s2c 解密。
-     注意：严格 KEX 会重置「包序列号」，但 OpenSSH 的 GCM nonce 计数器（OpenSSL 内部 IV 计数器）
-     跨 NEWKEYS 持续递增、不重置——我们 c2sSeq/s2cSeq 直接充当该计数器，因此不做重置。 */
-  await sess.send(21, new Uint8Array(0));
-  await sess.installEncKey(K, H);
-  void strictKex;
-  phase = 'newkeys';
-  await sess.waitFor(21, step);
-  sess.expectEncrypted = true;
-  await sess.installDecKey(K, H);
+    /* 4. NEWKEYS：发完即切 c2s 加密；收到对端 NEWKEYS 后再切 s2c 解密。
+       注意：严格 KEX 会重置「包序列号」，但 OpenSSH 的 GCM nonce 计数器（OpenSSL 内部 IV 计数器）
+       跨 NEWKEYS 持续递增、不重置——我们 c2sSeq/s2cSeq 直接充当该计数器，因此不做重置。 */
+    await sess.send(21, new Uint8Array(0));
+    await sess.installEncKey(K, H);
+    void strictKex;
+    phase = 'newkeys';
+    await sess.waitFor(21, step);
+    sess.expectEncrypted = true;
+    await sess.installDecKey(K, H);
 
-  /* 5. 服务请求 + 认证 */
-  // 先等服务器首个加密包（EXT_INFO 等）锁定 nonce 约定，再发 SERVICE_REQUEST（c2s 加密需要它）
-  await Promise.race([sess.nonceLatched, new Promise((r) => setTimeout(r, 3000))]);
-  if (sess.nonceScheme === 'auto') sess.nonceScheme = 'rfc5647';
-  await sess.send(5, str('ssh-userauth'));
-  phase = 'service-accept';
-  await sess.waitFor(6, step);
-  phase = 'auth';
-  await authenticate(sess, cfg, step);
+    /* 5. 服务请求 + 认证 */
+    // 先等服务器首个加密包（EXT_INFO 等）锁定 nonce 约定，再发 SERVICE_REQUEST（c2s 加密需要它）
+    await Promise.race([sess.nonceLatched, new Promise((r) => setTimeout(r, 3000))]);
+    if (sess.nonceScheme === 'auto') sess.nonceScheme = 'rfc5647';
+    await sess.send(5, str('ssh-userauth'));
+    phase = 'service-accept';
+    await sess.waitFor(6, step);
+    phase = 'auth';
+    await authenticate(sess, cfg, step);
 
-  /* 6. exec 通道 */
-  phase = 'exec';
-  return await execChannel(sess, command, step, fingerprint);
+    return { fingerprint, step };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // 附加阶段上下文，便于定位（连接被服务器关闭时尤为关键）
@@ -959,5 +979,177 @@ async function execChannel(sess: SshSession, command: string, step: number, fing
     return { code, stdout, stderr, hostFingerprint: fingerprint };
   } finally {
     if (execTimer) clearTimeout(execTimer);
+  }
+}
+
+/* ---------- 交互式 shell 通道（Web SSH 终端） ---------- */
+
+/** 浏览器提交的 Web SSH 连接参数（与云端 /ssh 配置同构，仅字段名扁平化） */
+export interface SshTermConnect {
+  host: string;
+  port: number;
+  user: string;
+  authKind: 'password' | 'key';
+  password?: string;
+  privateKey?: string;
+  fingerprint?: string;
+}
+
+/** 校验浏览器提交的连接参数并绑定传输，返回可直接交给 sshExec/sshShell 的配置 */
+export function parseSshTermConfig(raw: unknown, transport: SshTcpFactory): { ok: true; value: SshConfig } | { ok: false; error: string } {
+  const c = raw as Partial<SshTermConnect> | null;
+  if (!c || typeof c !== 'object') return { ok: false, error: '连接配置缺失' };
+  const host = String(c.host ?? '').trim();
+  const user = String(c.user ?? '').trim();
+  const port = Number(c.port) || 22;
+  if (!host || !user || host.length > 253 || user.length > 128) return { ok: false, error: 'host / user 无效' };
+  if (port < 1 || port > 65535) return { ok: false, error: 'port 无效' };
+  if (c.authKind === 'key') {
+    const privateKey = String(c.privateKey ?? '');
+    if (!privateKey.includes('PRIVATE KEY')) return { ok: false, error: '私钥格式无效' };
+    return { ok: true, value: { host, port, user, auth: { kind: 'key', privateKey }, expectedFingerprint: c.fingerprint || undefined, transport } };
+  }
+  if (c.authKind === 'password') {
+    const password = String(c.password ?? '');
+    if (!password) return { ok: false, error: '密码不能为空' };
+    return { ok: true, value: { host, port, user, auth: { kind: 'password', password }, expectedFingerprint: c.fingerprint || undefined, transport } };
+  }
+  return { ok: false, error: 'authKind 必须是 password 或 key' };
+}
+
+export interface SshShellOptions {
+  cols?: number;
+  rows?: number;
+  term?: string;
+  /** shell 输出（stdout 与 stderr 合并，按到达顺序） */
+  onData?: (data: string) => void;
+  /** 通道结束（正常 exit-status / EOF / CLOSE 或异常断开） */
+  onExit?: (code: number) => void;
+  onError?: (message: string) => void;
+  /** 连接建立后回报主机指纹（首次连接可让浏览器保存 TOFU） */
+  onFingerprint?: (fingerprint: string) => void;
+}
+
+export interface SshShellHandle {
+  send(data: string): void;
+  resize(cols: number, rows: number): void;
+  close(): void;
+}
+
+/** 打开交互式 shell：session + pty-req + shell 通道，浏览器 WebSocket 转发输入/输出 */
+export async function sshShell(cfg: SshConfig, opts: SshShellOptions = {}): Promise<SshShellHandle> {
+  const sess = new SshSession(cfg);
+  const { fingerprint, step } = await handshake(sess, cfg, Math.max(cfg.timeoutMs ?? 30_000, 30_000));
+  opts.onFingerprint?.(fingerprint);
+  const sender = 0;
+  const cols = Math.max(20, Math.min(500, opts.cols ?? 80));
+  const rows = Math.max(5, Math.min(200, opts.rows ?? 24));
+  const term = opts.term || 'xterm-256color';
+  let exitCode: number | null = null;
+  let gotEof = false;
+  let ended = false;
+  const offs: (() => void)[] = [];
+
+  const finish = (code: number, err?: string): void => {
+    if (ended) return;
+    ended = true;
+    for (const off of offs) off();
+    if (err) opts.onError?.(err);
+    opts.onExit?.(code);
+  };
+
+  try {
+    offs.push(
+      sess.on(1, (p) => {
+        const reason = disconnectReason(p);
+        finish(-1, `服务器断开连接${reason ? `: ${reason}` : ''}`);
+      }),
+    );
+    offs.push(
+      sess.on(94, (p) => {
+        const len = readU32(p, 4);
+        opts.onData?.(TD.decode(p.slice(8, 8 + len)));
+      }),
+    );
+    offs.push(
+      sess.on(95, (p) => {
+        const len = readU32(p, 8);
+        opts.onData?.(TD.decode(p.slice(12, 12 + len)));
+      }),
+    );
+    offs.push(
+      sess.on(98, (p) => {
+        const reqLen = readU32(p, 4);
+        const req = TD.decode(p.slice(8, 8 + reqLen));
+        if (req === 'exit-status') {
+          exitCode = readU32(p, 9 + reqLen);
+          if (gotEof) finish(exitCode);
+        } else if (req === 'exit-signal') {
+          exitCode = exitCode ?? -1;
+        }
+      }),
+    );
+    offs.push(
+      sess.on(96, () => {
+        gotEof = true;
+        if (exitCode !== null) finish(exitCode);
+      }),
+    );
+    offs.push(
+      sess.on(97, () => {
+        finish(exitCode ?? 0);
+      }),
+    );
+    offs.push(
+      sess.on(92, () => {
+        finish(-1, '服务器拒绝打开通道');
+      }),
+    );
+    offs.push(
+      sess.on(100, () => {
+        finish(-1, '服务器拒绝 PTY/shell 请求');
+      }),
+    );
+
+    await sess.send(90, concat(str('session'), u32(sender), u32(1 << 20), u32(32768)));
+    await sess.waitFor(91, step);
+    // PTY 请求（TERM + 窗口大小），失败仍尝试无 PTY 的 shell？不：交互终端需要 PTY，直接报错
+    await sess.send(
+      98,
+      concat(u32(sender), str('pty-req'), new Uint8Array([1]), str(term), u32(cols), u32(rows), u32(0), u32(0), str('')),
+    );
+    const pty = await sess.waitAny([99, 100], step);
+    if (pty.type === 100) throw new Error('服务器拒绝 PTY 请求（请确认 sshd 允许 pty）');
+    await sess.send(98, concat(u32(sender), str('shell'), new Uint8Array([1])));
+    const shell = await sess.waitAny([99, 100], step);
+    if (shell.type === 100) throw new Error('服务器拒绝打开 shell 通道');
+
+    return {
+      send(data: string): void {
+        if (ended) return;
+        void sess.send(94, concat(u32(sender), str(data))).catch(() => {
+          /* 通道已关闭 */
+        });
+      },
+      resize(c, r): void {
+        if (ended) return;
+        void sess
+          .send(98, concat(u32(sender), str('window-change'), new Uint8Array([0]), u32(Math.max(20, Math.min(500, c))), u32(Math.max(5, Math.min(200, r))), u32(0), u32(0)))
+          .catch(() => {
+            /* 通道已关闭 */
+          });
+      },
+      close(): void {
+        finish(-1);
+        void sess.send(97, u32(sender)).catch(() => {
+          /* ignore */
+        });
+        void sess.close();
+      },
+    };
+  } catch (e) {
+    finish(-1, e instanceof Error ? e.message : String(e));
+    void sess.close();
+    throw e;
   }
 }

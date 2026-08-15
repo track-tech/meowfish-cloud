@@ -54,6 +54,20 @@ interface DurableObjectNamespace {
   get(id: DurableObjectId): DurableObjectStub;
 }
 
+/** WebSocket（Web SSH 终端用；Worker 全局 WebSocketPair） */
+interface WebSocket {
+  accept(): void;
+  addEventListener(type: 'message', listener: (event: { data: string | ArrayBuffer }) => void): void;
+  addEventListener(type: 'close' | 'error', listener: (event: unknown) => void): void;
+  send(data: string | ArrayBuffer): void;
+  close(code?: number, reason?: string): void;
+}
+
+declare class WebSocketPair {
+  readonly 0: WebSocket;
+  readonly 1: WebSocket;
+}
+
 /** 出站 TCP socket（cloudflare:sockets connect，Worker 直连 SSH 用） */
 declare module 'cloudflare:sockets' {
   export interface SocketAddress {

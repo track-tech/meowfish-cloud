@@ -131,8 +131,8 @@ const TOOL_DEFS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: '联网搜索最新信息（Bing/Yandex/DuckDuckGo）。参数: query、count',
-      parameters: { type: 'object', properties: { query: { type: 'string' }, count: { type: 'number' } }, required: ['query'] },
+      description: '联网搜索最新信息（多引擎聚合去重：Bing/百度/搜狗优先，Google/Brave 补充；可传 page 翻页追问）。参数: query、count、page',
+      parameters: { type: 'object', properties: { query: { type: 'string' }, count: { type: 'number' }, page: { type: 'number' } }, required: ['query'] },
     },
   },
   {
@@ -490,7 +490,8 @@ export class CfDriver {
     const ssh = this.sshCfg();
     if (!ssh) return '（未配置 SSH 服务器：用 /ssh 配置后即可控制远程服务器）';
     const { sshExec } = await import('./ssh.js');
-    const r = await sshExec({ ...ssh, timeoutMs, signal: this.abortCtrl?.signal }, cmd);
+    const { cloudflareTcp } = await import('./socket.js');
+    const r = await sshExec({ ...ssh, timeoutMs, signal: this.abortCtrl?.signal, transport: cloudflareTcp }, cmd);
     if (!this.config.ssh!.fingerprint && r.hostFingerprint) {
       // 首次连接：记录主机指纹（TOFU）
       this.config.ssh!.fingerprint = r.hostFingerprint;
@@ -557,7 +558,7 @@ export class CfDriver {
     if (name === 'web_search' || name === 'web_fetch') {
       // 联网工具直接在 Worker 执行（CF 网络无墙）
       if (name === 'web_search') {
-        const results = await webSearch(String(args.query ?? ''), Number(args.count ?? 5));
+        const results = await webSearch(String(args.query ?? ''), Number(args.count ?? 5), this.abortCtrl?.signal, Number(args.page ?? 1));
         return results.length
           ? results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n\n')
           : '（没有搜到结果）';

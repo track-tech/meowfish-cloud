@@ -286,9 +286,94 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+interface TermHandle {
+  send(data: string): void;
+  resize(cols: number, rows: number): void;
+  close(): void;
+}
+
+/** Web SSH 终端：Worker 级 WebSocket（不进 DO，连接存续期间 Worker 保持活跃），
+ *  浏览器首条消息携带连接配置（与 /ssh 同样的凭据，仅内存使用），SSH shell 通道直连远程服务器 */
+async function sshTermUpgrade(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const deviceId = readDeviceCookie(request.headers.get('Cookie'));
+  if (String(request.headers.get('Upgrade') ?? '').toLowerCase() !== 'websocket') {
+    return json({ ok: false, error: '需要 WebSocket 升级' }, 426);
+  }
+  if (!deviceId) return json({ ok: false, error: '缺少设备 Cookie，请刷新页面' }, 403);
+
+  const pair = new WebSocketPair();
+  const client = pair[0];
+  const server = pair[1];
+  server.accept();
+
+  let term: TermHandle | null = null;
+  let closed = false;
+  const send = (payload: unknown): void => {
+    if (!closed) {
+      try {
+        server.send(JSON.stringify(payload));
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+  const cleanup = (): void => {
+    if (closed) return;
+    closed = true;
+    term?.close();
+    term = null;
+  };
+
+  server.addEventListener('message', (ev) => {
+    let msg: Record<string, unknown>;
+    try {
+      msg = JSON.parse(String(ev.data)) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (msg.type === 'connect') {
+      if (term) return;
+      void (async () => {
+        try {
+          const [{ parseSshTermConfig, sshShell }, { cloudflareTcp }] = await Promise.all([import('./ssh.js'), import('./socket.js')]);
+          const parsed = parseSshTermConfig(msg.cfg, cloudflareTcp);
+          if (!parsed.ok) {
+            send({ type: 'error', message: parsed.error });
+            return;
+          }
+          term = await sshShell(parsed.value, {
+            cols: typeof msg.cols === 'number' ? msg.cols : undefined,
+            rows: typeof msg.rows === 'number' ? msg.rows : undefined,
+            onFingerprint: (fp) => send({ type: 'fingerprint', fingerprint: fp }),
+            onData: (text) => send({ type: 'data', data: text }),
+            onExit: (code) => send({ type: 'exit', code }),
+            onError: (message) => send({ type: 'error', message }),
+          });
+          send({ type: 'ready' });
+        } catch (e) {
+          send({ type: 'error', message: e instanceof Error ? e.message : String(e) });
+        }
+      })();
+      return;
+    }
+    if (msg.type === 'input' && typeof msg.data === 'string') term?.send(msg.data);
+    else if (msg.type === 'resize' && typeof msg.cols === 'number' && typeof msg.rows === 'number') term?.resize(msg.cols, msg.rows);
+    else if (msg.type === 'close') cleanup();
+  });
+  server.addEventListener('close', cleanup);
+  server.addEventListener('error', cleanup);
+
+  void url;
+  return new Response(null, { status: 101, webSocket: client } as unknown as ResponseInit);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    // 所有请求进入同一个 Durable Object 实例，保证驱动/SSE 状态全局唯一
+    const url = new URL(request.url);
+    // Web SSH 终端走 Worker 级 WebSocket（连接存续期间 Worker 不休眠）
+    if (url.pathname === '/ssh-term') return sshTermUpgrade(request);
+    // 其余请求进入同一个 Durable Object 实例，保证驱动/SSE 状态全局唯一
     const id = env.MEOWFISH.idFromName('app');
     return env.MEOWFISH.get(id).fetch(request);
   },

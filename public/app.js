@@ -9,7 +9,7 @@
       'select-all': '全选', 'cancel': '取消', 'delete-selected': '删除所选',
       'model': '模型', 'theme': '主题', 'menu': '菜单',
       'regenerate': '🔄 重生成', 'continue': '✍️ 续写', 'character': '🐱 角色',
-      'profile': '📝 设定', 'tools': '🛠️ 工具', 'search': '🔍 搜索',
+      'profile': '📝 设定', 'tools': '🛠️ 工具', 'search': '🔍 搜索', 'sshterm': '🖥️ 终端',
       'export': '⬇️ 导出', 'help': '❓ 帮助', 'abort': '⏹ 中断',
       'input-placeholder': '输入消息…（@ 引用文件 · / 命令）',
       'send': '发送', 'no-match': '（无匹配项）', 'close': '关闭', 'confirm': '确认',
@@ -39,7 +39,7 @@
       'select-all': 'Select All', 'cancel': 'Cancel', 'delete-selected': 'Delete Selected',
       'model': 'Model', 'theme': 'Theme', 'menu': 'Menu',
       'regenerate': '🔄 Regenerate', 'continue': '✍️ Continue', 'character': '🐱 Character',
-      'profile': '📝 Profile', 'tools': '🛠️ Tools', 'search': '🔍 Search',
+      'profile': '📝 Profile', 'tools': '🛠️ Tools', 'search': '🔍 Search', 'sshterm': '🖥️ Terminal',
       'export': '⬇️ Export', 'help': '❓ Help', 'abort': '⏹ Abort',
       'input-placeholder': 'Type a message… (@ reference · / commands)',
       'send': 'Send', 'no-match': '（no match）', 'close': 'Close', 'confirm': 'OK',
@@ -147,7 +147,8 @@
     if (!text) return;
     inputEl.value = '';
     inputEl.style.height = 'auto';
-    if (text.charAt(0) === '/') post('/ui/command', { line: text });
+    if (text === '/sshterm') openSshTerminal();
+    else if (text.charAt(0) === '/') post('/ui/command', { line: text });
     else post('/ui/send', { text: text });
   }
 
@@ -1092,6 +1093,281 @@
     };
   }
 
+  /* ---------- Web SSH 交互式终端（WebSocket ↔ SSH shell 通道） ---------- */
+
+  var SSH_TERM_KEY = 'meowfish-sshterm';
+  var termActive = false;
+  var termWs = null;
+  var termCfg = null;
+  var termConnected = false;
+  var termLines = [];
+  var termRow = 0;
+  var termCol = 0;
+  var termClass = '';
+  var termRenderPending = false;
+
+  function loadSshTermConfig() {
+    try {
+      var raw = localStorage.getItem(SSH_TERM_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  function saveSshTermConfig(cfg) {
+    try { localStorage.setItem(SSH_TERM_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ }
+  }
+
+  function termStatus(text, cls) {
+    var el = $('ssh-term-status');
+    el.textContent = text;
+    el.className = 'ssh-term-status' + (cls ? ' ' + cls : '');
+  }
+
+  function termCols() {
+    var screen = $('ssh-term-screen');
+    var w = screen ? screen.clientWidth : window.innerWidth;
+    return Math.max(20, Math.min(500, Math.floor((w - 24) / 8.4)));
+  }
+  function termRows() {
+    var screen = $('ssh-term-screen');
+    var h = screen ? screen.clientHeight : window.innerHeight;
+    return Math.max(5, Math.min(200, Math.floor((h - 20) / 19)));
+  }
+
+  /* ---- 轻量 ANSI 终端渲染（SGR 颜色 / CR LF BS TAB / 常用 CSI 光标控制） ---- */
+  function termEnsureLine() {
+    while (termLines.length <= termRow) termLines.push([]);
+  }
+  function termPut(ch) {
+    termEnsureLine();
+    var line = termLines[termRow];
+    if (termCol >= line.length) line.push({ ch: ch, cls: termClass });
+    else line[termCol] = { ch: ch, cls: termClass };
+    termCol++;
+  }
+  function termClearToEnd() {
+    termEnsureLine();
+    termLines[termRow] = termLines[termRow].slice(0, termCol);
+  }
+  function termClearLine() {
+    termEnsureLine();
+    termLines[termRow] = [];
+    termCol = 0;
+  }
+  function termClearScreen() {
+    termLines = [[]];
+    termRow = 0;
+    termCol = 0;
+  }
+  function termTrimLines() {
+    if (termLines.length <= 500) return;
+    termLines = termLines.slice(termLines.length - 500);
+    termRow = Math.min(termRow, termLines.length - 1);
+  }
+  function termRender() {
+    if (termRenderPending) return;
+    termRenderPending = true;
+    requestAnimationFrame(function () {
+      termRenderPending = false;
+      var el = $('ssh-term-output');
+      if (!el) return;
+      var html = termLines.map(function (line) {
+        return '<span>' + line.map(function (c) {
+          var body = esc(c.ch);
+          return c.cls ? '<span class="' + c.cls + '">' + body + '</span>' : body;
+        }).join('') + '</span>';
+      }).join('\n');
+      el.innerHTML = html;
+      var screen = $('ssh-term-screen');
+      if (screen) screen.scrollTop = screen.scrollHeight;
+    });
+  }
+  function termApplyCsi(params, cmd) {
+    var parts = params.length ? params.split(';') : [];
+    var p0 = parts[0] ? parseInt(parts[0], 10) : 0;
+    var p1 = parts[1] ? parseInt(parts[1], 10) : 0;
+    if (isNaN(p0)) p0 = 0;
+    if (isNaN(p1)) p1 = 0;
+    if (cmd === 'm') {
+      if (!parts.length || p0 === 0) { termClass = ''; return; }
+      var cls = termClass.split(' ').filter(Boolean);
+      for (var i = 0; i < parts.length; i++) {
+        var n = parseInt(parts[i], 10);
+        if (n === 0) { cls = []; continue; }
+        if (n === 1) cls.push('b');
+        else if (n >= 30 && n <= 37) cls.push('c' + n);
+        else if (n >= 90 && n <= 97) cls.push('c' + n);
+        else if (n === 39) cls = cls.filter(function (x) { return !/^c\d+$/.test(x); });
+      }
+      termClass = cls.join(' ');
+      return;
+    }
+    if (cmd === 'K') { if (p0 === 2) termClearLine(); else termClearToEnd(); return; }
+    if (cmd === 'J') { if (p0 === 2 || p0 === 3) termClearScreen(); return; }
+    if (cmd === 'H' || cmd === 'f') { termRow = Math.max(0, (p0 || 1) - 1); termCol = Math.max(0, (p1 || 1) - 1); termEnsureLine(); return; }
+    if (cmd === 'A') termRow = Math.max(0, termRow - (p0 || 1));
+    else if (cmd === 'B') termRow = termRow + (p0 || 1);
+    else if (cmd === 'C') termCol = termCol + (p0 || 1);
+    else if (cmd === 'D') termCol = Math.max(0, termCol - (p0 || 1));
+    else if (cmd === 'G') termCol = Math.max(0, p0 - 1);
+    else if (cmd === 'd') { termRow = Math.max(0, p0 - 1); termEnsureLine(); }
+    termTrimLines();
+  }
+  function termWrite(text) {
+    var i = 0;
+    while (i < text.length) {
+      var ch = text.charAt(i++);
+      if (ch === '\r') { termCol = 0; continue; }
+      if (ch === '\n') { termRow++; termCol = 0; termTrimLines(); continue; }
+      if (ch === '\b') { if (termCol > 0) termCol--; continue; }
+      if (ch === '\t') { termCol = (Math.floor(termCol / 8) + 1) * 8; continue; }
+      if (ch === '\x1b') {
+        if (text.charAt(i) === '[') {
+          var j = i + 1;
+          var params = '';
+          while (j < text.length && /[0-9;?]/.test(text.charAt(j))) params += text.charAt(j++);
+          if (text.charAt(j) !== undefined) termApplyCsi(params, text.charAt(j++));
+          i = j;
+          continue;
+        }
+        if (text.charAt(i) === ']') {
+          var k = text.indexOf('\x07', i);
+          i = k < 0 ? text.length : k + 1;
+          continue;
+        }
+        continue;
+      }
+      termPut(ch);
+    }
+    termRender();
+  }
+
+  function termSend(data) {
+    if (termWs && termConnected) termWs.send(JSON.stringify({ type: 'input', data: data }));
+  }
+  function closeTermWs() {
+    if (termWs) {
+      try { termWs.close(); } catch (e) { /* ignore */ }
+      termWs = null;
+    }
+  }
+
+  function termConnect(cfg) {
+    closeTermWs();
+    termClearScreen();
+    termStatus('连接中…', '');
+    termConnected = false;
+    var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    var ws;
+    try {
+      ws = new WebSocket(proto + location.host + withToken('/ssh-term'));
+    } catch (e) {
+      termStatus('WebSocket 不可用', 'err');
+      return;
+    }
+    termWs = ws;
+    ws.onopen = function () {
+      ws.send(JSON.stringify({ type: 'connect', cfg: cfg, cols: termCols(), rows: termRows() }));
+    };
+    ws.onmessage = function (ev) {
+      var m;
+      try { m = JSON.parse(ev.data); } catch (err) { return; }
+      if (m.type === 'ready') {
+        termConnected = true;
+        termStatus(cfg.user + '@' + cfg.host + ':' + (cfg.port || 22), 'on');
+      } else if (m.type === 'fingerprint' && m.fingerprint) {
+        if (!cfg.fingerprint) {
+          cfg.fingerprint = m.fingerprint;
+          saveSshTermConfig(cfg);
+        }
+      } else if (m.type === 'data') {
+        termWrite(m.data);
+      } else if (m.type === 'error') {
+        termConnected = false;
+        termStatus(String(m.message || '连接失败'), 'err');
+        termWrite('\r\n[' + String(m.message || '连接失败') + ']\r\n');
+      } else if (m.type === 'exit') {
+        termConnected = false;
+        termStatus('已退出（code ' + m.code + '）', 'err');
+      }
+    };
+    ws.onclose = function () {
+      termConnected = false;
+      if (termActive) termStatus('连接已断开', 'err');
+    };
+    ws.onerror = function () {
+      termConnected = false;
+      if (termActive) termStatus('连接错误', 'err');
+    };
+  }
+
+  function showTermView() {
+    termActive = true;
+    $('ssh-term-view').classList.remove('hidden');
+    document.body.classList.add('term-active');
+    termClearScreen();
+    termInputEl().focus();
+  }
+  function termInputEl() { return $('ssh-term-input'); }
+  function exitSshTerminal() {
+    termActive = false;
+    closeTermWs();
+    termConnected = false;
+    $('ssh-term-view').classList.add('hidden');
+    document.body.classList.remove('term-active');
+    inputEl.focus();
+  }
+
+  function openSshTermForm() {
+    var cfg = termCfg || loadSshTermConfig() || { host: '', port: 22, user: 'root', authKind: 'password', password: '' };
+    $('modal-backdrop').classList.remove('hidden');
+    $('modal-title').textContent = 'SSH 终端连接';
+    $('modal-filter').classList.add('hidden');
+    var body = $('modal-body');
+    var actions = $('modal-actions');
+    body.innerHTML =
+      '<label class="form-field"><span>主机</span><input type="text" id="stf-host" value="' + esc(cfg.host) + '" placeholder="user@host 或 host"></label>' +
+      '<label class="form-field"><span>端口</span><input type="number" id="stf-port" value="' + esc(String(cfg.port || 22)) + '"></label>' +
+      '<label class="form-field"><span>用户名</span><input type="text" id="stf-user" value="' + esc(cfg.user) + '"></label>' +
+      '<label class="form-field"><span>认证方式</span><select id="stf-auth"><option value="password">密码</option><option value="key">私钥（ed25519）</option></select></label>' +
+      '<label class="form-field" id="stf-pw"><span>密码</span><input type="password" id="stf-password" value="' + esc(cfg.password || '') + '"></label>' +
+      '<label class="form-field hidden" id="stf-key"><span>私钥（OpenSSH ed25519）</span><textarea rows="4" id="stf-key-text" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">' + esc(cfg.privateKey || '') + '</textarea></label>';
+    actions.innerHTML = '<button class="modal-btn primary" id="dlg-submit">连接</button><button class="modal-btn" id="dlg-cancel">' + t('cancel') + '</button>';
+    function syncAuth() {
+      var key = $('stf-auth').value === 'key';
+      $('stf-pw').classList.toggle('hidden', key);
+      $('stf-key').classList.toggle('hidden', !key);
+    }
+    $('stf-auth').addEventListener('change', syncAuth);
+    syncAuth();
+    $('dlg-cancel').addEventListener('click', hideDialog);
+    $('dlg-submit').addEventListener('click', function () {
+      var host = $('stf-host').value.trim();
+      var user = $('stf-user').value.trim();
+      var authKind = $('stf-auth').value;
+      if (!host || !user) { pushToast('请填写主机与用户名'); return; }
+      var next = {
+        host: host, port: parseInt($('stf-port').value, 10) || 22, user: user,
+        authKind: authKind,
+        password: authKind === 'password' ? $('stf-password').value : '',
+        privateKey: authKind === 'key' ? $('stf-key-text').value.trim() : '',
+        fingerprint: cfg.fingerprint || '',
+      };
+      termCfg = next;
+      saveSshTermConfig(next);
+      hideDialog();
+      showTermView();
+      termConnect(next);
+    });
+  }
+
+  function openSshTerminal() {
+    if (termActive) { termInputEl().focus(); return; }
+    termCfg = loadSshTermConfig();
+    if (!termCfg) { openSshTermForm(); return; }
+    showTermView();
+    termConnect(termCfg);
+  }
+
   /* ---------- 免提连续语音对话（OpenAI Realtime 式体验 · DeepSeek + MiMo） ---------- */
 
   var speechKey = '';                     // MiMo key：请求头带上（本地服务端 secrets 兜底）
@@ -1821,12 +2097,63 @@
   $('btn-theme').addEventListener('click', function () { post('/ui/command', { line: '/theme' }); });
   $('btn-menu').addEventListener('click', function () { post('/ui/command', { line: '/config' }); });
   document.querySelectorAll('#quickbar button[data-cmd]').forEach(function (btn) {
-    btn.addEventListener('click', function () { post('/ui/command', { line: btn.getAttribute('data-cmd') }); });
+    btn.addEventListener('click', function () {
+      var cmd = btn.getAttribute('data-cmd');
+      if (cmd === '/sshterm') openSshTerminal();
+      else post('/ui/command', { line: cmd });
+    });
   });
   $('modal-backdrop').addEventListener('click', function (e) {
     if (e.target === this && dialog) {
       post('/ui/close', { id: dialog.id });
       hideDialog();
+    }
+  });
+
+  // ---- Web SSH 终端事件 ----
+  $('btn-sshterm').addEventListener('click', openSshTerminal);
+  $('ssh-term-exit').addEventListener('click', exitSshTerminal);
+  $('ssh-term-reconfig').addEventListener('click', openSshTermForm);
+  $('ssh-term-screen').addEventListener('click', function () { termInputEl().focus(); });
+  termInputEl().addEventListener('keydown', function (e) {
+    if (!termActive) return;
+    var c = e.ctrlKey ? e.key.toLowerCase() : '';
+    if (e.ctrlKey && (c === 'c' || c === 'd' || c === 'l' || c === 'z' || c === 'a' || c === 'e' || c === 'k' || c === 'u' || c === 'w')) {
+      var seqs = { c: '\x03', d: '\x04', l: '\x0c', z: '\x1a', a: '\x01', e: '\x05', k: '\x0b', u: '\x15', w: '\x17' };
+      termSend(seqs[c]);
+      e.preventDefault();
+      return;
+    }
+    if (e.metaKey || e.altKey) return;
+    if (e.key === 'Enter') { termSend('\r'); e.preventDefault(); return; }
+    if (e.key === 'Backspace') { termSend('\x7f'); e.preventDefault(); return; }
+    if (e.key === 'Tab') { termSend('\t'); e.preventDefault(); return; }
+    if (e.key === 'ArrowUp') { termSend('\x1b[A'); e.preventDefault(); return; }
+    if (e.key === 'ArrowDown') { termSend('\x1b[B'); e.preventDefault(); return; }
+    if (e.key === 'ArrowRight') { termSend('\x1b[C'); e.preventDefault(); return; }
+    if (e.key === 'ArrowLeft') { termSend('\x1b[D'); e.preventDefault(); return; }
+    if (e.key === 'Home') { termSend('\x1b[H'); e.preventDefault(); return; }
+    if (e.key === 'End') { termSend('\x1b[F'); e.preventDefault(); return; }
+    if (e.key === 'Delete') { termSend('\x1b[3~'); e.preventDefault(); return; }
+    if (e.key.length === 1) { termSend(e.key); e.preventDefault(); }
+  });
+  termInputEl().addEventListener('input', function () {
+    if (!termActive) return;
+    var v = termInputEl().value;
+    if (v) {
+      termInputEl().value = '';
+      termSend(v);
+    }
+  });
+  termInputEl().addEventListener('paste', function (e) {
+    if (!termActive) return;
+    e.preventDefault();
+    var text = (e.clipboardData || window.clipboardData).getData('text');
+    if (text) termSend(text);
+  });
+  window.addEventListener('resize', function () {
+    if (termActive && termWs && termConnected) {
+      termWs.send(JSON.stringify({ type: 'resize', cols: termCols(), rows: termRows() }));
     }
   });
 
