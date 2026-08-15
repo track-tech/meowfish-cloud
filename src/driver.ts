@@ -3,7 +3,7 @@ import type { ChatMessage, ModelProfile, ToolDef } from './llm/types.js';
 import { MODEL_PRESETS, presetKeyOf, type AppConfig } from './llm/profiles-core.js';
 import { emptyCard, parseCardJson, type CharacterCard } from './rp/card-core.js';
 import { buildRpSystem, buildToolSection, buildVoiceSection, type RpUser } from './rp/prompt.js';
-import { webSearch } from './core/web.js';
+import { webSearch, type SearchResult } from './core/web.js';
 import { buildGrepCmd, buildListCmd, buildReadCmd, buildWriteCmd } from './core/ssh-cmds.js';
 import { globToRegExp } from './core/glob.js';
 import { aboutText, APP_VERSION } from './core/meta.js';
@@ -276,10 +276,18 @@ export class CfDriver {
       return;
     }
     const cfg = raw as Partial<CloudConfig>;
+    const cp = (cfg.permissions ?? {}) as { allow?: unknown; deny?: unknown };
     this.config = {
       general: { ...this.config.general, ...(cfg.general ?? {}) },
-      permissions: { ...this.config.permissions, ...(cfg.permissions ?? {}) },
-      profiles: Array.isArray(cfg.profiles) && cfg.profiles.length ? cfg.profiles : this.config.profiles,
+      permissions: {
+        allow: Array.isArray(cp.allow) ? cp.allow.map(String) : this.config.permissions.allow,
+        deny: Array.isArray(cp.deny) ? cp.deny.map(String) : this.config.permissions.deny,
+      },
+      profiles: Array.isArray(cfg.profiles) && cfg.profiles.length
+        ? (cfg.profiles as Partial<ModelProfile>[]).filter(
+            (p): p is ModelProfile => !!p && typeof p.name === 'string' && typeof p.baseUrl === 'string' && typeof p.model === 'string',
+          )
+        : this.config.profiles,
       ...(cfg.ssh !== undefined ? { ssh: cfg.ssh } : {}),
     };
     this.profile = this.config.profiles.find((p) => p.name === this.config.general.defaultModel) ?? this.config.profiles[0] ?? null;
@@ -383,13 +391,22 @@ export class CfDriver {
     if (!raw || typeof raw !== 'object') return;
     if (Array.isArray(raw.sessions)) {
       for (const s of raw.sessions) {
-        if (s && typeof s === 'object' && typeof (s as CfSessionRow).id === 'string') {
-          await this.stores.saveSession(s as CfSessionRow);
+        const row = s as Partial<CfSessionRow> | null;
+        if (row && typeof row === 'object' && typeof row.id === 'string' && Array.isArray(row.messages)) {
+          const usage =
+            row.usage && typeof row.usage === 'object' && typeof row.usage.promptTokens === 'number' && typeof row.usage.completionTokens === 'number'
+              ? row.usage
+              : { promptTokens: 0, completionTokens: 0 };
+          await this.stores.saveSession({ ...row, usage } as CfSessionRow);
         }
       }
     }
     if (Array.isArray(raw.cards)) {
-      const stored = (raw.cards as { name: string; data: CharacterCard }[]).filter((c) => c && c.name !== MEOWFISH_CARD.data.name);
+      const stored = (raw.cards as { name?: unknown; data?: CharacterCard }[])
+        .filter(
+          (c): c is { name: string; data: CharacterCard } =>
+            !!c && typeof c === 'object' && typeof c.name === 'string' && !!c.data && !!c.data.data && typeof c.data.data.name === 'string' && c.name !== MEOWFISH_CARD.data.name,
+        );
       this.cards = [{ name: MEOWFISH_CARD.data.name, data: MEOWFISH_CARD }, ...stored];
       const wanted = this.config.general.defaultCharacter;
       this.card = (this.cards.find((c) => c.name === wanted) ?? this.cards[0])?.data ?? null;
@@ -540,13 +557,15 @@ export class CfDriver {
       const { webFetchPage } = await import('./core/web.js');
       return webFetchPage(url);
     }
+    // 纵深防御：即使调用方漏判，未授权的写操作/命令也不得执行
+    if (!authorized && !READ_TOOLS.has(name)) return '（操作未获用户授权）';
     if (this.sshCfg()) return this.sshTool(name, args);
     // 未配置 SSH：走工具守护兜底（旧部署方式）
     const r = await this.env.toolCall(name, args, authorized);
     return r.output;
   }
 
-  private confirmTool(tool: string, detail: string): Promise<boolean> {
+  private confirmTool(tool: string, detail: string): Promise<'once' | 'always' | 'deny'> {
     return new Promise((resolvePromise) => {
       this.ui.setStatus('waiting');
       this.ui.openConfirm({
@@ -557,10 +576,30 @@ export class CfDriver {
           { key: 'a', label: this.lang === 'en' ? 'Always allow' : '总是允许' },
           { key: 'd', label: this.lang === 'en' ? 'Deny' : '拒绝' },
         ],
-        onChoose: (opt) => resolvePromise(opt.key !== 'd'),
-        onCancel: () => resolvePromise(false),
+        onChoose: (opt) => resolvePromise(opt.key === 'y' ? 'once' : opt.key === 'a' ? 'always' : 'deny'),
+        onCancel: () => resolvePromise('deny'),
       });
     });
+  }
+
+  /** 云端权限判定：yolo / 只读 / 已存规则 / 用户确认；「总是允许」会写入浏览器本地配置 */
+  private async checkPermission(tool: string, detail: string): Promise<{ allowed: boolean; output?: string }> {
+    if (this.yolo || READ_TOOLS.has(tool)) return { allowed: true };
+    const match = (r: string): boolean => detail === r || detail.startsWith(r);
+    const perms = this.config.permissions ?? (this.config.permissions = { allow: [], deny: [] });
+    const deny = Array.isArray(perms.deny) ? perms.deny : [];
+    if (deny.some(match)) return { allowed: false, output: '（操作被拒绝规则拦截）' };
+    const allow = Array.isArray(perms.allow) ? perms.allow : (perms.allow = []);
+    if (allow.some(match)) return { allowed: true };
+    if (tool === 'bash' && isReadOnlyCommand(detail)) return { allowed: true };
+    const decision = await this.confirmTool(tool, detail);
+    if (decision === 'always') {
+      if (!allow.some(match)) allow.push(detail);
+      this.emitConfig();
+      return { allowed: true };
+    }
+    if (decision === 'once') return { allowed: true };
+    return { allowed: false, output: '（用户拒绝了该操作）' };
   }
 
   /* ---------- 主流程 ---------- */
@@ -573,7 +612,12 @@ export class CfDriver {
       await this.directBash(text.slice(1).trim());
       return;
     }
-    const resolved = this.toolsOn ? await this.resolveAtRefs(text) : text;
+    let resolved = text;
+    try {
+      if (this.toolsOn) resolved = await this.resolveAtRefs(text);
+    } catch (e) {
+      this.ui.pushSystem(`⚠ 文件引用失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
     this.session.messages.push({ role: 'user', content: resolved });
     this.ui.pushMessage({ role: 'user', name: this.userName, content: text });
     await this.generate();
@@ -601,12 +645,18 @@ export class CfDriver {
     try {
       this.ui.pushMessage({ role: 'tool', toolLabel: command.slice(0, 60), content: '运行中…' });
       this.ui.setStatus('tool', command);
-      const authorized = this.yolo || (await this.confirmTool('bash', command));
-      const output = await this.callTool('bash', { command }, authorized);
+      const check = await this.checkPermission('bash', command);
+      const output = check.allowed
+        ? await this.callTool('bash', { command }, true)
+        : (check.output ?? '（用户拒绝了该操作）');
       this.ui.replaceLastMessage({ role: 'tool', toolLabel: output.split('\n')[0]?.slice(0, 60) ?? '', content: output });
       this.session!.messages.push({ role: 'user', content: `!${command}` }, { role: 'assistant', content: `命令输出:\n${output}` });
       this.ui.setStatus('idle');
       await this.saveSession();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.ui.replaceLastMessage({ role: 'tool', toolLabel: '执行出错', content: msg });
+      this.ui.setStatus('error', msg);
     } finally {
       this.abortCtrl = null;
     }
@@ -624,17 +674,10 @@ export class CfDriver {
     const card = this.card;
     this.abortCtrl = new AbortController();
     this.ui.setStatus('thinking');
-    let first = true;
     try {
       // 工具暴露：电脑权限开 → 全部；仅联网开关开 → 仅 web 工具；都关 → 无工具
       const defs = this.toolsOn ? TOOL_DEFS : this.webSearchOn ? WEB_ONLY_TOOL_DEFS : [];
-      await this.toolLoop(card, (delta) => {
-        if (first) {
-          first = false;
-          this.ui.setStatus('streaming');
-        }
-        this.ui.appendDelta(delta);
-      }, defs);
+      await this.toolLoop(card, defs);
       this.ui.finalizeStreaming();
       this.ui.setTokens(this.tokensLabel());
       this.ui.setStatus('idle');
@@ -656,7 +699,7 @@ export class CfDriver {
 
   /** 工具循环（本地实现，不依赖 node 环境）。toolDefs 决定暴露哪些工具：
    *  默认全部（电脑权限开）；传 WEB_ONLY_TOOL_DEFS 则仅联网工具 */
-  private async toolLoop(card: CharacterCard, onText: (delta: string) => void, toolDefs: ToolDef[] = TOOL_DEFS): Promise<void> {
+  private async toolLoop(card: CharacterCard, toolDefs: ToolDef[] = TOOL_DEFS): Promise<void> {
     const systemMsg: ChatMessage = {
       role: 'system',
       content: buildRpSystem(card, this.rpUser) + '\n\n' + buildToolSection(toolDefs.map((t) => t.function.name), this.sshCfg() ? `SSH 远程服务器 ${this.sshLabel()}` : '（未配置 SSH 服务器）') + (this.voiceChat ? '\n\n' + buildVoiceSection() : ''),
@@ -717,23 +760,23 @@ export class CfDriver {
           args = { content: call.function.arguments };
         }
         const label = name === 'bash' ? String(args.command ?? '').slice(0, 120) : String(args.path ?? args.pattern ?? args.url ?? '');
+        const detail = name === 'bash' ? String(args.command ?? '') : label;
         this.ui.setStatus('tool', label);
         this.ui.pushMessage({ role: 'tool', toolLabel: `${name}${label ? ': ' + label : ''}`, content: '运行中…' });
-        let authorized = this.yolo || READ_TOOLS.has(name);
-        if (!authorized && name === 'bash') {
-          // 只读命令自动放行（与本地版行为一致）
-          authorized = isReadOnlyCommand(String(args.command ?? ''));
+        const check = await this.checkPermission(name, detail);
+        let output: string;
+        try {
+          output = check.allowed
+            ? await this.callTool(name, args, true)
+            : (check.output ?? '（用户拒绝了该操作）');
+        } catch (e) {
+          output = `工具执行出错: ${e instanceof Error ? e.message : String(e)}`;
         }
-        if (!authorized) {
-          authorized = await this.confirmTool(name, label);
-        }
-        const output = await this.callTool(name, args, authorized);
         this.ui.replaceLastMessage({ role: 'tool', toolLabel: output.split('\n')[0]?.slice(0, 60) ?? '', content: output });
         messages.push({ role: 'tool', content: output, tool_call_id: call.id });
       }
     }
     this.session!.messages = messages;
-    void onText;
   }
 
   abort(): void {
@@ -1436,7 +1479,13 @@ export class CfDriver {
   }
 
   private async runSearch(query: string): Promise<void> {
-    const results = await webSearch(query, 5);
+    let results: SearchResult[];
+    try {
+      results = await webSearch(query, 5);
+    } catch (e) {
+      this.ui.pushSystem(`⚠ 搜索失败: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
     const text = results.length
       ? results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n\n')
       : `（没有搜到「${query}」的结果）`;
@@ -1449,7 +1498,13 @@ export class CfDriver {
   }
 
   private async openFilePicker(): Promise<void> {
-    const output = await this.callTool('glob', { pattern: '**/*' }, false);
+    let output: string;
+    try {
+      output = await this.callTool('glob', { pattern: '**/*' }, false);
+    } catch (e) {
+      this.ui.pushSystem(`⚠ 无法读取远程文件列表: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
     const files = output
       .split('\n')
       .map((l) => l.trim())
@@ -1573,9 +1628,13 @@ export class CfDriver {
             ? `SSH config saved: ${this.sshLabel()} (stored in your browser) · testing connection…`
             : `已保存 SSH 配置: ${this.sshLabel()}（配置存在浏览器本地）· 正在测试连接…`,
         );
-        const out = await this.sshRun('echo meowfish-ok && uname -a', 20_000);
-        if (out.includes('meowfish-ok')) this.ui.pushSystem(`✓ SSH ${L === 'en' ? 'connection OK!' : '连接成功！'}\n${out.trim()}`);
-        else this.ui.pushSystem(`⚠ SSH ${L === 'en' ? 'test failed' : '测试失败'}: ${out.split('\n')[0]?.slice(0, 120)}`);
+        try {
+          const out = await this.sshRun('echo meowfish-ok && uname -a', 20_000);
+          if (out.includes('meowfish-ok')) this.ui.pushSystem(`✓ SSH ${L === 'en' ? 'connection OK!' : '连接成功！'}\n${out.trim()}`);
+          else this.ui.pushSystem(`⚠ SSH ${L === 'en' ? 'test failed' : '测试失败'}: ${out.split('\n')[0]?.slice(0, 120)}`);
+        } catch (e) {
+          this.ui.pushSystem(`⚠ SSH ${L === 'en' ? 'test error' : '测试异常'}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       },
     });
   }

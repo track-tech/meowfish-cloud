@@ -223,7 +223,8 @@ async function nonStreamRequest(opts: ChatOptions, messages: ChatMessage[]): Pro
     completionTokens: j.usage?.completion_tokens ?? estimateTokens(content),
   };
   const message: ChatMessage = { role: 'assistant', content };
-  const reasoning = (choice?.message as { reasoning_content?: string } | undefined)?.reasoning_content ?? '';
+  const rawMsg = choice?.message as { reasoning_content?: string; reasoning?: string } | undefined;
+  const reasoning = rawMsg?.reasoning_content ?? rawMsg?.reasoning ?? '';
   const rawCalls = choice?.message?.tool_calls;
   if (Array.isArray(rawCalls) && rawCalls.length) {
     message.tool_calls = rawCalls.map((tc, i) => {

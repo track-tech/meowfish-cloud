@@ -131,6 +131,20 @@ export async function mimoTts(
   const decoder = new TextDecoder();
   let buf = '';
   // SSE 解析：按 \n\n 分帧，逐行处理 data:
+  const handleLine = (line: string): void => {
+    if (!line.startsWith('data:')) return;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') return;
+    try {
+      const chunk = JSON.parse(payload) as MimoChunk;
+      if (chunk.error?.message) throw new MimoError(chunk.error.message);
+      const data = chunk.choices?.[0]?.delta?.audio?.data;
+      if (data) onChunk?.(data);
+    } catch (e) {
+      if (e instanceof MimoError) throw e;
+      /* 跳过坏帧 */
+    }
+  };
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -139,20 +153,10 @@ export async function mimoTts(
     while ((idx = buf.indexOf('\n\n')) >= 0) {
       const frame = buf.slice(0, idx);
       buf = buf.slice(idx + 2);
-      for (const line of frame.split('\n')) {
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        try {
-          const chunk = JSON.parse(payload) as MimoChunk;
-          if (chunk.error?.message) throw new MimoError(chunk.error.message);
-          const data = chunk.choices?.[0]?.delta?.audio?.data;
-          if (data) onChunk?.(data);
-        } catch (e) {
-          if (e instanceof MimoError) throw e;
-          /* 跳过坏帧 */
-        }
-      }
+      for (const line of frame.split('\n')) handleLine(line);
     }
   }
+  // 处理流结束前未以空行收尾的残余数据
+  buf += decoder.decode();
+  for (const line of buf.split('\n')) handleLine(line);
 }

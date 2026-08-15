@@ -21,4 +21,4 @@ class_name = "MeowFishApp"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["MeowFishApp"]
+new_classes = ["MeowFishApp"]

@@ -228,12 +228,24 @@ export async function webSearch(query: string, count = 5, signal?: AbortSignal):
   return [];
 }
 
-/** 内网地址防护（web_fetch 用） */
+/** 内网/保留地址防护（web_fetch 用，覆盖常见云元数据与内网段） */
 export function isPrivateHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  if (h === 'localhost' || h === '::1' || h === '0.0.0.0' || h.endsWith('.local')) return true;
+  const h = hostname.toLowerCase().replace(/\.$/, '');
+  if (h === 'localhost' || h === '::1' || h === '::' || h === '0.0.0.0' || h.endsWith('.local')) return true;
   if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)) return true;
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  // 云元数据/链路本地/CGNAT/文档与保留 IPv4
+  if (/^169\.254\./.test(h)) return true;
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)) return true;
+  if (/^192\.0\.0\./.test(h) || /^192\.0\.2\./.test(h) || /^198\.18\./.test(h) || /^198\.19\./.test(h)) return true;
+  if (/^198\.51\.100\./.test(h) || /^203\.0\.113\./.test(h)) return true;
+  if (/^22[4-9]\./.test(h) || /^23[0-9]\./.test(h) || /^24[0-9]\./.test(h) || /^25[0-5]\./.test(h)) return true;
+  // IPv6 回环/链路本地/唯一本地/组播/文档段；IPv4 映射地址递归检查内网 IPv4
+  if (h.includes(':')) {
+    if (h.startsWith('::ffff:')) return isPrivateHost(h.slice(7));
+    if (h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe8') || h.startsWith('fe9') || h.startsWith('fea') || h.startsWith('feb')) return true;
+    if (h.startsWith('ff') || h.startsWith('2001:db8:')) return true;
+  }
   return false;
 }
 

@@ -40,7 +40,7 @@ export class MeowFishApp {
   private getApp(deviceId: string): Promise<AppState> {
     let p = this.apps.get(deviceId);
     if (!p) {
-      p = this.boot(deviceId).catch((e: unknown) => {
+      p = this.boot().catch((e: unknown) => {
         this.apps.delete(deviceId);
         throw e;
       });
@@ -49,7 +49,7 @@ export class MeowFishApp {
     return p;
   }
 
-  private async boot(deviceId: string): Promise<AppState> {
+  private async boot(): Promise<AppState> {
     const stores = new MemoryStores();
     const ui = new WebUi({
       theme: findTheme(BUILTIN_THEMES, '浅滩'),
@@ -89,25 +89,28 @@ export class MeowFishApp {
       },
     });
     await driver.init();
-    void deviceId;
     return { ui, driver, clients };
   }
 
   private sseResponse(state: AppState): Response {
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
     const stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'snapshot', state: state.ui.snapshot() })}\n\n`));
         state.clients.add(controller);
-        const heartbeat = setInterval(() => {
+        heartbeat = setInterval(() => {
           try {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'ping' })}\n\n`));
           } catch {
-            clearInterval(heartbeat);
+            if (heartbeat) clearInterval(heartbeat);
+            heartbeat = null;
             state.clients.delete(controller);
           }
         }, 25_000);
       },
       cancel: (controller) => {
+        if (heartbeat) clearInterval(heartbeat);
+        heartbeat = null;
         state.clients.delete(controller);
       },
     });
@@ -124,33 +127,6 @@ export class MeowFishApp {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === '/auth-check') return json({ ok: true });
-    // 无状态 SSH 探针：请求体自带 ssh 配置（不依赖内存态；也用于诊断）
-    if (url.pathname === '/ssh-probe' && request.method === 'POST') {
-      try {
-        const probeBody = (await request.json()) as { ssh?: Record<string, unknown>; command?: string; debug?: boolean };
-        const ssh = probeBody.ssh;
-        if (!ssh || typeof ssh.host !== 'string' || !ssh.host) return json({ ok: false, output: '（未提供 ssh 配置）' }, 400);
-        const { sshExec } = await import('./ssh.js');
-        const r = await sshExec(
-          {
-            host: ssh.host,
-            port: Number(ssh.port) || 22,
-            user: String(ssh.user ?? 'root'),
-            auth:
-              ssh.authKind === 'key'
-                ? { kind: 'key', privateKey: String(ssh.privateKey ?? '') }
-                : { kind: 'password', password: String(ssh.password ?? '') },
-            expectedFingerprint: typeof ssh.fingerprint === 'string' && ssh.fingerprint ? ssh.fingerprint : undefined,
-            timeoutMs: 120_000,
-            debug: probeBody.debug === true,
-          },
-          typeof probeBody.command === 'string' && probeBody.command ? probeBody.command : 'echo meowfish-probe-ok && uname -a',
-        );
-        return json({ ok: r.code === 0, code: r.code, output: (r.stdout + (r.stdout && r.stderr ? '\n' : '') + r.stderr).trim(), fingerprint: r.hostFingerprint });
-      } catch (e) {
-        return json({ ok: false, output: e instanceof Error ? e.message : String(e) });
-      }
-    }
     const deviceId = url.searchParams.get('device') || 'default';
     if (url.pathname === '/events') return this.sseResponse(await this.getApp(deviceId));
     if (url.pathname.startsWith('/ui/')) return this.uiRoute(url.pathname, request, await this.getApp(deviceId));
