@@ -1331,7 +1331,7 @@
       '<label class="form-field"><span>认证方式</span><select id="stf-auth"><option value="password">密码</option><option value="key">私钥（ed25519）</option></select></label>' +
       '<label class="form-field" id="stf-pw"><span>密码</span><input type="password" id="stf-password" value="' + esc(cfg.password || '') + '"></label>' +
       '<label class="form-field hidden" id="stf-key"><span>私钥（OpenSSH ed25519）</span><textarea rows="4" id="stf-key-text" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">' + esc(cfg.privateKey || '') + '</textarea></label>';
-    actions.innerHTML = '<button class="modal-btn primary" id="dlg-submit">连接</button><button class="modal-btn" id="dlg-cancel">' + t('cancel') + '</button>';
+    actions.innerHTML = '<button class="modal-btn primary" id="dlg-submit" type="button">连接</button><button class="modal-btn" id="dlg-cancel" type="button">' + t('cancel') + '</button>';
     function syncAuth() {
       var key = $('stf-auth').value === 'key';
       $('stf-pw').classList.toggle('hidden', key);
@@ -1344,12 +1344,27 @@
       var host = $('stf-host').value.trim();
       var user = $('stf-user').value.trim();
       var authKind = $('stf-auth').value;
+      // 允许把 user@host 整体填在主机栏
+      if (!user && host.indexOf('@') > 0) {
+        var at = host.indexOf('@');
+        user = host.slice(0, at);
+        host = host.slice(at + 1);
+        $('stf-user').value = user;
+        $('stf-host').value = host;
+      }
       if (!host || !user) { pushToast('请填写主机与用户名'); return; }
+      var password = authKind === 'password' ? $('stf-password').value : '';
+      var privateKey = authKind === 'key' ? $('stf-key-text').value.trim() : '';
+      if (authKind === 'password' && !password) { pushToast('请填写密码'); return; }
+      if (authKind === 'key' && !privateKey.includes('PRIVATE KEY')) {
+        pushToast('请粘贴完整的 OpenSSH ed25519 私钥（-----BEGIN OPENSSH PRIVATE KEY-----…）');
+        return;
+      }
       var next = {
         host: host, port: parseInt($('stf-port').value, 10) || 22, user: user,
         authKind: authKind,
-        password: authKind === 'password' ? $('stf-password').value : '',
-        privateKey: authKind === 'key' ? $('stf-key-text').value.trim() : '',
+        password: password,
+        privateKey: privateKey,
         fingerprint: cfg.fingerprint || '',
       };
       termCfg = next;

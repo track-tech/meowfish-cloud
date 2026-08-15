@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=35">
+  <link rel="stylesheet" href="/style.css?v=36">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -122,23 +122,23 @@
         <div class="vv-line" id="vv-bot-line"></div>
       </div>
     </div>
-
-    <!-- Web SSH 交互式终端（全屏覆盖层） -->
-    <div id="ssh-term-view" class="hidden">
-      <div class="ssh-term-top">
-        <span class="ssh-term-title">🖥️ SSH 终端</span>
-        <span id="ssh-term-status" class="ssh-term-status">未连接</span>
-        <span class="spacer"></span>
-        <button id="ssh-term-reconfig" class="pill">连接设置</button>
-        <button id="ssh-term-exit" class="pill">退出</button>
-      </div>
-      <div id="ssh-term-screen">
-        <pre id="ssh-term-output" tabindex="-1"></pre>
-      </div>
-      <textarea id="ssh-term-input" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
-    </div>
   </div>
 
-  <script src="/app.js?v=35"></script>
+  <!-- Web SSH 交互式终端（全屏覆盖层，body 顶层保证盖住侧边栏） -->
+  <div id="ssh-term-view" class="hidden">
+    <div class="ssh-term-top">
+      <span class="ssh-term-title">🖥️ SSH 终端</span>
+      <span id="ssh-term-status" class="ssh-term-status">未连接</span>
+      <span class="spacer"></span>
+      <button id="ssh-term-reconfig" class="pill" type="button">连接设置</button>
+      <button id="ssh-term-exit" class="pill" type="button">退出</button>
+    </div>
+    <div id="ssh-term-screen">
+      <pre id="ssh-term-output" tabindex="-1"></pre>
+    </div>
+    <textarea id="ssh-term-input" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+  </div>
+
+  <script src="/app.js?v=36"></script>
 </body>
 </html>
