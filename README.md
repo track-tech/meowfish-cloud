@@ -2,6 +2,8 @@
 
 > **MeowFish**（本地版仓库：pi-meowfish-agent，地址创建后补充）的 Cloudflare 部署项目，独立发布、独立部署。
 
+> 🌐 在线示例：https://meowfish-agent.kdns.fr/（部署即所得；会话 / 角色卡 / 配置与凭据只保存在你自己的浏览器里）
+
 ![version](https://img.shields.io/badge/version-1.0.0-7dd3fc) ![license](https://img.shields.io/badge/license-AGPL--3.0-orange) ![runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-f6821f)
 
 UI / 聊天 / 角色扮演 / 模型代理跑在 Cloudflare Worker——**云端零持久化**：会话 / 角色卡 / 配置全部只存各浏览器 localStorage，按 deviceId 隔离，**可多人公用同一部署互不可见**。电脑权限工具经 **Worker 内置 SSH 客户端直连你的服务器**（或 HTTPS + token 转发到远程工具守护）。
