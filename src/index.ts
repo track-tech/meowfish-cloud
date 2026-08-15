@@ -95,9 +95,10 @@ export class MeowFishApp {
       }
     });
     const driver = new CfDriver(ui, stores, {
+      toolServerConfigured: Boolean(this.env.TOOL_SERVER_URL && this.env.TOOL_SERVER_TOKEN),
       toolCall: async (tool, args, authorized) => {
         if (!this.env.TOOL_SERVER_URL || !this.env.TOOL_SERVER_TOKEN) {
-          return { ok: false, output: '（未配置工具服务器：请在 wrangler.toml 设置 TOOL_SERVER_URL / TOOL_SERVER_TOKEN）' };
+          return { ok: false, output: '（未配置 SSH 且未配置工具服务器：请在网页输入 /ssh 配置远程服务器，或在 wrangler.toml 设置 TOOL_SERVER_URL / TOOL_SERVER_TOKEN 走旧版工具守护）' };
         }
         try {
           const res = await fetch(this.env.TOOL_SERVER_URL.replace(/\/+$/, '') + '/run', {

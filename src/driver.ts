@@ -21,6 +21,8 @@ import type { SshConfig } from './ssh.js';
 export interface CfEnv {
   /** 远程工具执行（ToolServer /run）——未配置 SSH 时的兜底通道 */
   toolCall: (tool: string, args: Record<string, unknown>, authorized: boolean) => Promise<{ ok: boolean; output: string }>;
+  /** 是否配置了远程工具守护（旧部署方式）；false 且无 SSH 时给用户 /ssh 引导而不是 wrangler 报错 */
+  toolServerConfigured?: boolean;
 }
 
 /** SSH 服务器配置（随用户本地配置一起存浏览器 localStorage） */
@@ -570,6 +572,12 @@ export class CfDriver {
     // 纵深防御：即使调用方漏判，未授权的写操作/命令也不得执行
     if (!authorized && !READ_TOOLS.has(name)) return '（操作未获用户授权）';
     if (this.sshCfg()) return this.sshTool(name, args);
+    // 未配置 SSH 且未配置工具守护：直接给模型可执行的 /ssh 引导，避免它去猜 wrangler.toml
+    if (!this.env.toolServerConfigured) {
+      return this.lang === 'en'
+        ? '（No SSH server configured yet. Ask the user to run /ssh and fill in host / port / user / password (or ed25519 private key) — all tools then run over Worker→SSH directly, no TOOL_SERVER_URL needed.）'
+        : '（还没有配置 SSH 服务器：请让用户输入 /ssh，填写主机 / 端口 / 用户名 / 密码或 ed25519 私钥。配置完成后所有工具都由 Worker 直连 SSH 执行，不需要 TOOL_SERVER_URL / TOOL_SERVER_TOKEN。）';
+    }
     // 未配置 SSH：走工具守护兜底（旧部署方式）
     const r = await this.env.toolCall(name, args, authorized);
     return r.output;
@@ -1002,7 +1010,7 @@ export class CfDriver {
         return;
       case 'permissions': {
         const r = this.config.permissions;
-        this.ui.pushSystem(`授权规则（yolo: ${this.yolo ? '开' : '关'}）\n总是允许: ${r.allow.length ? r.allow.join(' | ') : '（无）'}\n总是拒绝: ${r.deny.length ? r.deny.join(' | ') : '（无）'}\n（规则由远程工具守护执行）`);
+        this.ui.pushSystem(`授权规则（yolo: ${this.yolo ? '开' : '关'}）\n总是允许: ${r.allow.length ? r.allow.join(' | ') : '（无）'}\n总是拒绝: ${r.deny.length ? r.deny.join(' | ') : '（无）'}\n（规则由 Worker 权限层执行：直连 SSH，未配置 SSH 时经工具守护兜底）`);
         return;
       }
       case 'yolo':

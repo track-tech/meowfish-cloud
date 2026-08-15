@@ -809,7 +809,7 @@
     } else if (m.kind === 'confirm') {
       body.innerHTML = '<div class="confirm-detail">' + esc(m.detail).replace(/\n/g, '<br>') + '</div>';
       actions.innerHTML = (m.options || []).map(function (o) {
-        return '<button class="modal-btn" data-key="' + esc(o.key) + '">[' + esc(o.key) + '] ' + esc(o.label) + '</button>';
+        return '<button class="modal-btn" data-key="' + esc(o.key) + '">' + esc(o.label) + '</button>';
       }).join('');
       actions.querySelectorAll('.modal-btn').forEach(function (el) {
         el.addEventListener('click', function () {
