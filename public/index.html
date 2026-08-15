@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=38">
+  <link rel="stylesheet" href="/style.css?v=39">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -128,8 +128,11 @@
   <div id="ssh-term-view" class="hidden">
     <div class="ssh-term-top">
       <span class="ssh-term-title">🖥️ SSH 终端</span>
+      <div id="ssh-term-tabs" class="ssh-term-tabs"></div>
+      <button id="ssh-term-new" class="pill" type="button" title="新建连接">＋</button>
       <span id="ssh-term-status" class="ssh-term-status">未连接</span>
       <span class="spacer"></span>
+      <button id="ssh-term-clear" class="pill" type="button" title="清屏">清屏</button>
       <button id="ssh-term-reconfig" class="pill" type="button">连接设置</button>
       <button id="ssh-term-exit" class="pill" type="button">退出</button>
     </div>
@@ -139,6 +142,6 @@
     <textarea id="ssh-term-input" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
   </div>
 
-  <script src="/app.js?v=38"></script>
+  <script src="/app.js?v=39"></script>
 </body>
 </html>

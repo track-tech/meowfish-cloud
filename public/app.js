@@ -1093,18 +1093,17 @@
     };
   }
 
-  /* ---------- Web SSH 交互式终端（WebSocket ↔ SSH shell 通道） ---------- */
+  /* ---------- Web SSH 交互式终端（多标签 WebSocket ↔ SSH shell 通道） ---------- */
 
   var SSH_TERM_KEY = 'meowfish-sshterm';
   var termActive = false;
-  var termWs = null;
-  var termCfg = null;
-  var termConnected = false;
-  var termLines = [];
-  var termRow = 0;
-  var termCol = 0;
-  var termClass = '';
-  var termRenderPending = false;
+  var termTabs = [];
+  var termActiveIdx = -1;
+  var termSeq = 0;
+  var termFormTarget = null; // 表单提交目标：null = 新建标签，否则为 tab id
+  var TERM_MAX_LINES = 2000;
+
+  function activeTerm() { return termTabs[termActiveIdx] || null; }
 
   function loadSshTermConfig() {
     try {
@@ -1151,12 +1150,6 @@
     } catch (e) { /* ignore */ }
   }
 
-  function termStatus(text, cls) {
-    var el = $('ssh-term-status');
-    el.textContent = text;
-    el.className = 'ssh-term-status' + (cls ? ' ' + cls : '');
-  }
-
   function termCols() {
     var screen = $('ssh-term-screen');
     var w = screen ? screen.clientWidth : window.innerWidth;
@@ -1168,63 +1161,98 @@
     return Math.max(5, Math.min(200, Math.floor((h - 20) / 19)));
   }
 
-  /* ---- 轻量 ANSI 终端渲染（SGR 颜色 / CR LF BS TAB / 常用 CSI 光标控制） ---- */
-  function termEnsureLine() {
-    while (termLines.length <= termRow) termLines.push([]);
+  function newTermTab(cfg) {
+    return {
+      id: ++termSeq,
+      cfg: cfg,
+      title: cfg.user + '@' + cfg.host,
+      ws: null,
+      connected: false,
+      statusText: '未连接',
+      statusCls: '',
+      lines: [[]], row: 0, col: 0, cls: '', renderPending: false,
+    };
   }
-  function termPut(ch) {
-    termEnsureLine();
-    var line = termLines[termRow];
-    if (termCol >= line.length) line.push({ ch: ch, cls: termClass });
-    else line[termCol] = { ch: ch, cls: termClass };
-    termCol++;
+
+  function termStatus(tab, text, cls) {
+    tab.statusText = text;
+    tab.statusCls = cls || '';
+    if (tab === activeTerm()) renderTermStatus();
   }
-  function termClearToEnd() {
-    termEnsureLine();
-    termLines[termRow] = termLines[termRow].slice(0, termCol);
+  function renderTermStatus() {
+    var t = activeTerm();
+    var el = $('ssh-term-status');
+    el.textContent = t ? t.statusText : '未连接';
+    el.className = 'ssh-term-status' + (t && t.statusCls ? ' ' + t.statusCls : '');
   }
-  function termClearLine() {
-    termEnsureLine();
-    termLines[termRow] = [];
-    termCol = 0;
+
+  function termEnsureLine(tab) {
+    while (tab.lines.length <= tab.row) tab.lines.push([]);
   }
-  function termClearScreen() {
-    termLines = [[]];
-    termRow = 0;
-    termCol = 0;
+  function termPut(tab, ch) {
+    termEnsureLine(tab);
+    var line = tab.lines[tab.row];
+    if (tab.col >= line.length) line.push({ ch: ch, cls: tab.cls });
+    else line[tab.col] = { ch: ch, cls: tab.cls };
+    tab.col++;
   }
-  function termTrimLines() {
-    if (termLines.length <= 500) return;
-    termLines = termLines.slice(termLines.length - 500);
-    termRow = Math.min(termRow, termLines.length - 1);
+  function termClearToEnd(tab) {
+    termEnsureLine(tab);
+    tab.lines[tab.row] = tab.lines[tab.row].slice(0, tab.col);
   }
-  function termRender() {
-    if (termRenderPending) return;
-    termRenderPending = true;
+  function termClearLine(tab) {
+    termEnsureLine(tab);
+    tab.lines[tab.row] = [];
+    tab.col = 0;
+  }
+  function termClearScreen(tab) {
+    tab.lines = [[]];
+    tab.row = 0;
+    tab.col = 0;
+  }
+  function termTrimLines(tab) {
+    if (tab.lines.length <= TERM_MAX_LINES) return;
+    tab.lines = tab.lines.slice(tab.lines.length - TERM_MAX_LINES);
+    tab.row = Math.min(tab.row, tab.lines.length - 1);
+  }
+  function termHtml(tab) {
+    return tab.lines.map(function (line) {
+      return '<span>' + line.map(function (c) {
+        var body = esc(c.ch);
+        return c.cls ? '<span class="' + c.cls + '">' + body + '</span>' : body;
+      }).join('') + '</span>';
+    }).join('\n');
+  }
+  function termRender(tab) {
+    if (tab.renderPending) return;
+    tab.renderPending = true;
     requestAnimationFrame(function () {
-      termRenderPending = false;
+      tab.renderPending = false;
+      if (tab !== activeTerm()) return; // 非活动标签只更新缓冲，切回时重绘
       var el = $('ssh-term-output');
       if (!el) return;
-      var html = termLines.map(function (line) {
-        return '<span>' + line.map(function (c) {
-          var body = esc(c.ch);
-          return c.cls ? '<span class="' + c.cls + '">' + body + '</span>' : body;
-        }).join('') + '</span>';
-      }).join('\n');
-      el.innerHTML = html;
+      el.innerHTML = termHtml(tab);
       var screen = $('ssh-term-screen');
       if (screen) screen.scrollTop = screen.scrollHeight;
     });
   }
-  function termApplyCsi(params, cmd) {
+  function renderTermBuffer(tab) {
+    if (!tab) return;
+    var el = $('ssh-term-output');
+    if (!el) return;
+    el.innerHTML = termHtml(tab);
+    var screen = $('ssh-term-screen');
+    if (screen) screen.scrollTop = screen.scrollHeight;
+  }
+  function termApplyCsi(tab, params, cmd) {
     var parts = params.length ? params.split(';') : [];
     var p0 = parts[0] ? parseInt(parts[0], 10) : 0;
     var p1 = parts[1] ? parseInt(parts[1], 10) : 0;
     if (isNaN(p0)) p0 = 0;
     if (isNaN(p1)) p1 = 0;
     if (cmd === 'm') {
-      if (!parts.length || p0 === 0) { termClass = ''; return; }
-      var cls = termClass.split(' ').filter(Boolean);
+      if (!parts.length || p0 === 0) { tab.cls = ''; return; }
+      var cls = tab.cls.split(' ').filter(Boolean);
       for (var i = 0; i < parts.length; i++) {
         var n = parseInt(parts[i], 10);
         if (n === 0) { cls = []; continue; }
@@ -1233,34 +1261,34 @@
         else if (n >= 90 && n <= 97) cls.push('c' + n);
         else if (n === 39) cls = cls.filter(function (x) { return !/^c\d+$/.test(x); });
       }
-      termClass = cls.join(' ');
+      tab.cls = cls.join(' ');
       return;
     }
-    if (cmd === 'K') { if (p0 === 2) termClearLine(); else termClearToEnd(); return; }
-    if (cmd === 'J') { if (p0 === 2 || p0 === 3) termClearScreen(); return; }
-    if (cmd === 'H' || cmd === 'f') { termRow = Math.max(0, (p0 || 1) - 1); termCol = Math.max(0, (p1 || 1) - 1); termEnsureLine(); return; }
-    if (cmd === 'A') termRow = Math.max(0, termRow - (p0 || 1));
-    else if (cmd === 'B') termRow = termRow + (p0 || 1);
-    else if (cmd === 'C') termCol = termCol + (p0 || 1);
-    else if (cmd === 'D') termCol = Math.max(0, termCol - (p0 || 1));
-    else if (cmd === 'G') termCol = Math.max(0, p0 - 1);
-    else if (cmd === 'd') { termRow = Math.max(0, p0 - 1); termEnsureLine(); }
-    termTrimLines();
+    if (cmd === 'K') { if (p0 === 2) termClearLine(tab); else termClearToEnd(tab); return; }
+    if (cmd === 'J') { if (p0 === 2 || p0 === 3) termClearScreen(tab); return; }
+    if (cmd === 'H' || cmd === 'f') { tab.row = Math.max(0, (p0 || 1) - 1); tab.col = Math.max(0, (p1 || 1) - 1); termEnsureLine(tab); return; }
+    if (cmd === 'A') tab.row = Math.max(0, tab.row - (p0 || 1));
+    else if (cmd === 'B') tab.row = tab.row + (p0 || 1);
+    else if (cmd === 'C') tab.col = tab.col + (p0 || 1);
+    else if (cmd === 'D') tab.col = Math.max(0, tab.col - (p0 || 1));
+    else if (cmd === 'G') tab.col = Math.max(0, p0 - 1);
+    else if (cmd === 'd') { tab.row = Math.max(0, p0 - 1); termEnsureLine(tab); }
+    termTrimLines(tab);
   }
-  function termWrite(text) {
+  function termWrite(tab, text) {
     var i = 0;
     while (i < text.length) {
       var ch = text.charAt(i++);
-      if (ch === '\r') { termCol = 0; continue; }
-      if (ch === '\n') { termRow++; termCol = 0; termTrimLines(); continue; }
-      if (ch === '\b') { if (termCol > 0) termCol--; continue; }
-      if (ch === '\t') { termCol = (Math.floor(termCol / 8) + 1) * 8; continue; }
+      if (ch === '\r') { tab.col = 0; continue; }
+      if (ch === '\n') { tab.row++; tab.col = 0; termTrimLines(tab); continue; }
+      if (ch === '\b') { if (tab.col > 0) tab.col--; continue; }
+      if (ch === '\t') { tab.col = (Math.floor(tab.col / 8) + 1) * 8; continue; }
       if (ch === '\x1b') {
         if (text.charAt(i) === '[') {
           var j = i + 1;
           var params = '';
           while (j < text.length && /[0-9;?]/.test(text.charAt(j))) params += text.charAt(j++);
-          if (text.charAt(j) !== undefined) termApplyCsi(params, text.charAt(j++));
+          if (text.charAt(j) !== undefined) termApplyCsi(tab, params, text.charAt(j++));
           i = j;
           continue;
         }
@@ -1271,35 +1299,38 @@
         }
         continue;
       }
-      termPut(ch);
+      termPut(tab, ch);
     }
-    termRender();
+    termRender(tab);
   }
 
   function termSend(data) {
-    if (termWs && termConnected) termWs.send(JSON.stringify({ type: 'input', data: data }));
+    var t = activeTerm();
+    if (t && t.ws && t.connected) t.ws.send(JSON.stringify({ type: 'input', data: data }));
   }
-  function closeTermWs() {
-    if (termWs) {
-      try { termWs.close(); } catch (e) { /* ignore */ }
-      termWs = null;
+  function closeTabWs(tab) {
+    if (tab.ws) {
+      try { tab.ws.close(); } catch (e) { /* ignore */ }
+      tab.ws = null;
     }
+    tab.connected = false;
   }
 
-  function termConnect(cfg) {
-    closeTermWs();
-    termClearScreen();
-    termStatus('连接中…', '');
-    termConnected = false;
+  function connectTermTab(tab, cfg) {
+    closeTabWs(tab);
+    tab.cfg = cfg;
+    tab.title = cfg.user + '@' + cfg.host;
+    termClearScreen(tab);
+    termStatus(tab, '连接中…', '');
     var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
     var ws;
     try {
       ws = new WebSocket(proto + location.host + withToken('/ssh-term'));
     } catch (e) {
-      termStatus('WebSocket 不可用', 'err');
+      termStatus(tab, 'WebSocket 不可用', 'err');
       return;
     }
-    termWs = ws;
+    tab.ws = ws;
     ws.onopen = function () {
       ws.send(JSON.stringify({ type: 'connect', cfg: cfg, cols: termCols(), rows: termRows() }));
     };
@@ -1307,8 +1338,8 @@
       var m;
       try { m = JSON.parse(ev.data); } catch (err) { return; }
       if (m.type === 'ready') {
-        termConnected = true;
-        termStatus(cfg.user + '@' + cfg.host + ':' + (cfg.port || 22), 'on');
+        tab.connected = true;
+        termStatus(tab, cfg.user + '@' + cfg.host + ':' + (cfg.port || 22), 'on');
         // 连接成功：把这份 SSH 配置同步给机器人工具（/ssh 同款 config.ssh），避免终端能连、bot 却说没配
         syncTermConfigToApp(cfg);
       } else if (m.type === 'fingerprint' && m.fingerprint) {
@@ -1318,47 +1349,115 @@
         }
         syncTermConfigToApp(cfg);
       } else if (m.type === 'data') {
-        termWrite(m.data);
+        termWrite(tab, m.data);
       } else if (m.type === 'error') {
-        termConnected = false;
-        termStatus(String(m.message || '连接失败'), 'err');
-        termWrite('\r\n[' + String(m.message || '连接失败') + ']\r\n');
+        tab.connected = false;
+        termStatus(tab, String(m.message || '连接失败'), 'err');
+        termWrite(tab, '\r\n[' + String(m.message || '连接失败') + ']\r\n');
       } else if (m.type === 'exit') {
-        termConnected = false;
-        termStatus('已退出（code ' + m.code + '）', 'err');
+        tab.connected = false;
+        termStatus(tab, '已退出（code ' + m.code + '）', 'err');
       }
     };
     ws.onclose = function () {
-      termConnected = false;
-      if (termActive) termStatus('连接已断开', 'err');
+      tab.connected = false;
+      if (tab === activeTerm()) termStatus(tab, '连接已断开', 'err');
     };
     ws.onerror = function () {
-      termConnected = false;
-      if (termActive) termStatus('连接错误', 'err');
+      tab.connected = false;
+      if (tab === activeTerm()) termStatus(tab, '连接错误', 'err');
     };
+  }
+
+  function renderTermTabs() {
+    var el = $('ssh-term-tabs');
+    if (!el) return;
+    el.innerHTML = termTabs.map(function (t, i) {
+      return '<button type="button" class="ssh-term-tab' + (i === termActiveIdx ? ' active' : '') + '" data-i="' + i + '">' +
+        '<span class="tab-label">' + esc(t.title) + '</span>' +
+        '<span class="tab-close" data-close="' + i + '" title="关闭">×</span></button>';
+    }).join('');
+    el.querySelectorAll('.ssh-term-tab').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        var i = Number(btn.getAttribute('data-i'));
+        if (e.target.closest('.tab-close')) closeTermTab(i);
+        else switchTermTab(i);
+      });
+    });
+  }
+
+  function switchTermTab(i) {
+    if (i < 0 || i >= termTabs.length) return;
+    termActiveIdx = i;
+    renderTermTabs();
+    renderTermStatus();
+    renderTermBuffer(activeTerm());
+    termInputEl().focus();
+  }
+
+  function closeTermTab(i) {
+    var tab = termTabs[i];
+    if (!tab) return;
+    closeTabWs(tab);
+    termTabs.splice(i, 1);
+    if (!termTabs.length) {
+      termActiveIdx = -1;
+      exitSshTerminal();
+      return;
+    }
+    if (i < termActiveIdx) termActiveIdx--;
+    else if (i === termActiveIdx) termActiveIdx = Math.min(i, termTabs.length - 1);
+    renderTermTabs();
+    renderTermStatus();
+    renderTermBuffer(activeTerm());
+  }
+
+  function addTermTab(cfg) {
+    var tab = newTermTab(cfg);
+    termTabs.push(tab);
+    termActiveIdx = termTabs.length - 1;
+    if (!termActive) showTermView();
+    else {
+      renderTermTabs();
+      renderTermStatus();
+    }
+    renderTermBuffer(tab);
+    connectTermTab(tab, cfg);
   }
 
   function showTermView() {
     termActive = true;
     $('ssh-term-view').classList.remove('hidden');
     document.body.classList.add('term-active');
-    termClearScreen();
+    renderTermTabs();
+    renderTermStatus();
+    if (activeTerm()) renderTermBuffer(activeTerm());
     termInputEl().focus();
   }
   function termInputEl() { return $('ssh-term-input'); }
   function exitSshTerminal() {
     termActive = false;
-    closeTermWs();
-    termConnected = false;
+    termTabs.forEach(function (t) { closeTabWs(t); });
+    termTabs = [];
+    termActiveIdx = -1;
     $('ssh-term-view').classList.add('hidden');
     document.body.classList.remove('term-active');
     inputEl.focus();
   }
+  function clearActiveTerm() {
+    var t = activeTerm();
+    if (!t) return;
+    termClearScreen(t);
+    renderTermBuffer(t);
+    termSend('\x0c');
+  }
 
-  function openSshTermForm() {
-    var cfg = termCfg || loadAppSshConfig() || loadSshTermConfig() || { host: '', port: 22, user: 'root', authKind: 'password', password: '' };
+  function openSshTermForm(isNew) {
+    var target = isNew ? null : (termTabs.find(function (t) { return t.id === termFormTarget; }) || activeTerm());
+    termFormTarget = target ? target.id : null;
+    var cfg = target ? target.cfg : (loadAppSshConfig() || loadSshTermConfig() || { host: '', port: 22, user: 'root', authKind: 'password', password: '' });
     $('modal-backdrop').classList.remove('hidden');
-    $('modal-title').textContent = 'SSH 终端连接';
+    $('modal-title').textContent = isNew || !target ? 'SSH 终端连接' : 'SSH 终端连接设置';
     $('modal-filter').classList.add('hidden');
     var body = $('modal-body');
     var actions = $('modal-actions');
@@ -1405,22 +1504,32 @@
         privateKey: privateKey,
         fingerprint: cfg.fingerprint || '',
       };
-      termCfg = next;
       saveSshTermConfig(next);
       hideDialog();
-      showTermView();
-      termConnect(next);
+      var targetId = termFormTarget;
+      termFormTarget = null;
+      if (targetId) {
+        var idx = termTabs.findIndex(function (t) { return t.id === targetId; });
+        if (idx >= 0) {
+          var tab = termTabs[idx];
+          tab.cfg = next;
+          tab.title = next.user + '@' + next.host;
+          switchTermTab(idx);
+          connectTermTab(tab, next);
+          return;
+        }
+      }
+      addTermTab(next);
     });
   }
 
   function openSshTerminal() {
     if (termActive) { termInputEl().focus(); return; }
     // 机器人 /ssh 配置优先：终端与工具始终共用同一份凭据
-    termCfg = loadAppSshConfig() || loadSshTermConfig();
-    if (termCfg) saveSshTermConfig(termCfg);
-    if (!termCfg) { openSshTermForm(); return; }
-    showTermView();
-    termConnect(termCfg);
+    var cfg = loadAppSshConfig() || loadSshTermConfig();
+    if (cfg) saveSshTermConfig(cfg);
+    if (!cfg) { openSshTermForm(true); return; }
+    addTermTab(cfg);
   }
 
   /* ---------- 免提连续语音对话（OpenAI Realtime 式体验 · DeepSeek + MiMo） ---------- */
@@ -2168,7 +2277,9 @@
   // ---- Web SSH 终端事件 ----
   $('btn-sshterm').addEventListener('click', openSshTerminal);
   $('ssh-term-exit').addEventListener('click', exitSshTerminal);
-  $('ssh-term-reconfig').addEventListener('click', openSshTermForm);
+  $('ssh-term-reconfig').addEventListener('click', function () { openSshTermForm(false); });
+  $('ssh-term-new').addEventListener('click', function () { openSshTermForm(true); });
+  $('ssh-term-clear').addEventListener('click', clearActiveTerm);
   $('ssh-term-screen').addEventListener('click', function () { termInputEl().focus(); });
   termInputEl().addEventListener('keydown', function (e) {
     if (!termActive) return;
@@ -2207,8 +2318,9 @@
     if (text) termSend(text);
   });
   window.addEventListener('resize', function () {
-    if (termActive && termWs && termConnected) {
-      termWs.send(JSON.stringify({ type: 'resize', cols: termCols(), rows: termRows() }));
+    var t = activeTerm();
+    if (termActive && t && t.ws && t.connected) {
+      t.ws.send(JSON.stringify({ type: 'resize', cols: termCols(), rows: termRows() }));
     }
   });
 

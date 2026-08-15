@@ -1704,6 +1704,35 @@ html, body {
 #ssh-term-view .ssh-term-status { font-size: 0.85rem; color: #8b949e; }
 #ssh-term-view .ssh-term-status.on { color: #3fb950; }
 #ssh-term-view .ssh-term-status.err { color: #f85149; }
+.ssh-term-tabs {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+}
+.ssh-term-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid #30363d;
+  background: rgba(255, 255, 255, 0.04);
+  color: #c9d1d9;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ssh-term-tab.active { background: rgba(88, 166, 255, 0.16); border-color: rgba(88, 166, 255, 0.5); color: #e6edf3; }
+.ssh-term-tab .tab-close {
+  color: #8b949e;
+  font-weight: 700;
+  padding: 0 2px;
+}
+.ssh-term-tab .tab-close:hover { color: #f85149; }
+#ssh-term-new { font-size: 16px; line-height: 1; padding: 4px 10px; }
 #ssh-term-screen {
   flex: 1;
   overflow: auto;
