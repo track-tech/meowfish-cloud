@@ -1,8 +1,9 @@
 # MeowFish 云端版 ☁️ ฅ(^•ω•^)ฅ
 
 > **MeowFish**（本地版仓库：pi-meowfish-agent，地址创建后补充）的 Cloudflare 部署项目，独立发布、独立部署。
+> 🌐 English: [README_EN.md](README_EN.md)
 
-> 🌐 在线示例：https://meowfish-agent.kdns.fr/（部署即所得；会话 / 角色卡 / 配置与凭据只保存在你自己的浏览器里）
+> 🌐 在线示例：[https://meowfish-agent.kdns.fr/](https://meowfish-agent.kdns.fr/)（部署即所得；会话 / 角色卡 / 配置与凭据只保存在你自己的浏览器里）
 
 ![version](https://img.shields.io/badge/version-1.0.0-7dd3fc) ![license](https://img.shields.io/badge/license-AGPL--3.0-orange) ![runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-f6821f)
 
