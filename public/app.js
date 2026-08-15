@@ -1115,6 +1115,41 @@
   function saveSshTermConfig(cfg) {
     try { localStorage.setItem(SSH_TERM_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ }
   }
+  /** 从机器人配置（/ssh 表单，config.ssh）读取连接参数：让终端与工具使用同一份凭据 */
+  function loadAppSshConfig() {
+    try {
+      var c = loadLocalConfig();
+      if (c && c.ssh && c.ssh.host) {
+        return {
+          host: c.ssh.host,
+          port: Number(c.ssh.port) || 22,
+          user: c.ssh.user || 'root',
+          authKind: c.ssh.authKind === 'key' ? 'key' : 'password',
+          password: c.ssh.password || '',
+          privateKey: c.ssh.privateKey || '',
+          fingerprint: c.ssh.fingerprint || '',
+        };
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  /** 终端连接成功/指纹更新后，把同一份 SSH 配置同步进机器人 config.ssh（localStorage + Worker） */
+  function syncTermConfigToApp(cfg) {
+    try {
+      var appCfg = loadLocalConfig() || {};
+      appCfg.ssh = {
+        host: cfg.host,
+        port: Number(cfg.port) || 22,
+        user: cfg.user,
+        authKind: cfg.authKind === 'key' ? 'key' : 'password',
+        password: cfg.password || '',
+        privateKey: cfg.privateKey || '',
+        fingerprint: cfg.fingerprint || '',
+      };
+      saveLocalConfig(appCfg);
+      post('/ui/local-config', { config: appCfg });
+    } catch (e) { /* ignore */ }
+  }
 
   function termStatus(text, cls) {
     var el = $('ssh-term-status');
@@ -1274,11 +1309,14 @@
       if (m.type === 'ready') {
         termConnected = true;
         termStatus(cfg.user + '@' + cfg.host + ':' + (cfg.port || 22), 'on');
+        // 连接成功：把这份 SSH 配置同步给机器人工具（/ssh 同款 config.ssh），避免终端能连、bot 却说没配
+        syncTermConfigToApp(cfg);
       } else if (m.type === 'fingerprint' && m.fingerprint) {
         if (!cfg.fingerprint) {
           cfg.fingerprint = m.fingerprint;
           saveSshTermConfig(cfg);
         }
+        syncTermConfigToApp(cfg);
       } else if (m.type === 'data') {
         termWrite(m.data);
       } else if (m.type === 'error') {
@@ -1318,7 +1356,7 @@
   }
 
   function openSshTermForm() {
-    var cfg = termCfg || loadSshTermConfig() || { host: '', port: 22, user: 'root', authKind: 'password', password: '' };
+    var cfg = termCfg || loadAppSshConfig() || loadSshTermConfig() || { host: '', port: 22, user: 'root', authKind: 'password', password: '' };
     $('modal-backdrop').classList.remove('hidden');
     $('modal-title').textContent = 'SSH 终端连接';
     $('modal-filter').classList.add('hidden');
@@ -1377,7 +1415,9 @@
 
   function openSshTerminal() {
     if (termActive) { termInputEl().focus(); return; }
-    termCfg = loadSshTermConfig();
+    // 机器人 /ssh 配置优先：终端与工具始终共用同一份凭据
+    termCfg = loadAppSshConfig() || loadSshTermConfig();
+    if (termCfg) saveSshTermConfig(termCfg);
     if (!termCfg) { openSshTermForm(); return; }
     showTermView();
     termConnect(termCfg);
