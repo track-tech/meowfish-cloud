@@ -35,13 +35,22 @@ const READONLY_PREFIXES = [
 
 export function isReadOnlyCommand(command: string): boolean {
   const trimmed = command.trim();
-  // 含重定向写、管道进写工具的一律不算只读
-  if (/[>|]/.test(trimmed)) {
-    // 允许管道，但 > 写入除外
-    if (/>/.test(trimmed)) return false;
-  }
+  if (!trimmed) return false;
+  // 任何 shell 元字符都可能改变命令树语义（管道/分隔符/重定向/反引号/命令替换），一律不算只读
+  if (/[|;&<>`]/.test(trimmed) || trimmed.includes('$(')) return false;
   const lower = trimmed.toLowerCase();
+  // find -exec/-execdir 会执行任意命令，不算只读
+  if (lower.startsWith('find ') && /(^|\s)-exec(dir)?\b/.test(lower)) return false;
   return READONLY_PREFIXES.some((p) => lower === p || lower.startsWith(p + ' '));
+}
+
+/** 规则匹配：只匹配完整命令词或路径分量，避免 `ls` 命中 `ls; rm -rf /`、`rm` 误伤 `rmdir` */
+export function matchesRule(rule: string, target: string): boolean {
+  if (!rule) return false;
+  if (target === rule) return true;
+  if (!target.startsWith(rule)) return false;
+  const next = target.charAt(rule.length);
+  return next === ' ' || next === '\t' || next === '/' || next === '\\';
 }
 
 export class PermissionManager {
@@ -72,7 +81,7 @@ export class PermissionManager {
   }
 
   private match(rules: string[], target: string): boolean {
-    return rules.some((r) => target === r || target.startsWith(r));
+    return rules.some((r) => matchesRule(r, target));
   }
 
   /** 判断某次工具调用是否需要确认，以及是否被规则自动拒绝 */

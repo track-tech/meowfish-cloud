@@ -7,7 +7,7 @@ import { webSearch, type SearchResult } from './core/web.js';
 import { buildGrepCmd, buildListCmd, buildReadCmd, buildWriteCmd } from './core/ssh-cmds.js';
 import { globToRegExp } from './core/glob.js';
 import { aboutText, APP_VERSION } from './core/meta.js';
-import { isReadOnlyCommand } from './core/permissions.js';
+import { isReadOnlyCommand, matchesRule } from './core/permissions.js';
 import { BUILTIN_PACKS } from './ui/packs-core.js';
 import { BUILTIN_THEMES, themeIsLight } from './ui/themes-core.js';
 import { WebUi } from './webui.js';
@@ -224,10 +224,12 @@ export class CfDriver {
   /** 实时语音对话模式（免提语音：注入语音规则，回复走 TTS 朗读） */
   private voiceChat = false;
 
-  /** 开启/关闭语音对话模式（前端进入/退出语音视图时调用） */
+  /** 开启/关闭语音对话模式（前端进入/退出语音视图时调用；状态随配置持久化到浏览器，DO 回收不丢） */
   setVoiceChat(on: boolean): void {
     if (this.voiceChat === on) return;
     this.voiceChat = on;
+    this.config.general.voiceChat = on;
+    this.emitConfig();
     this.ui.pushSystem(on ? '语音对话模式已开启 —— 回复将口语化并带语音标记' : '语音对话模式已关闭');
   }
 
@@ -251,6 +253,9 @@ export class CfDriver {
     if (!this.session) {
       this.session = this.newSession(this.card?.data.name ?? '喵鱼');
     }
+    // 从浏览器配置恢复跨请求开关（零持久化红线：不能只存 DO 内存）
+    this.yolo = this.config.general.yolo === true;
+    this.voiceChat = this.config.general.voiceChat === true;
     this.ui.setModeLabel(this.toolsOn ? 'AGENT' : 'RP');
     this.ui.setToolsBadge?.(this.toolsOn);
     this.ui.setWebSearchBadge?.(this.webSearchOn);
@@ -298,6 +303,10 @@ export class CfDriver {
       this.card = cardHit.data;
       this.ui.pushSystem(`角色: ${this.card.data.name}`);
     }
+    // 恢复浏览器配置中的跨请求开关（yolo / 语音模式）
+    this.yolo = this.config.general.yolo === true;
+    this.voiceChat = this.config.general.voiceChat === true;
+    this.ui.setYoloBadge(this.yolo);
     this.ui.setModelLabel(this.modelLabel);
     this.ui.setModeLabel(this.toolsOn ? 'AGENT' : 'RP');
     this.ui.setToolsBadge?.(this.toolsOn);
@@ -567,6 +576,12 @@ export class CfDriver {
 
   private confirmTool(tool: string, detail: string): Promise<'once' | 'always' | 'deny'> {
     return new Promise((resolvePromise) => {
+      // DO 空闲约 30s 会被回收：授权确认必须在回收前有确定结果，否则等待它的请求永久挂起、busy 卡死
+      const timer = setTimeout(() => {
+        this.ui.cancelConfirm();
+        this.ui.setStatus('idle');
+        resolvePromise('deny');
+      }, 20_000);
       this.ui.setStatus('waiting');
       this.ui.openConfirm({
         title: this.lang === 'en' ? 'Permission required' : '权限确认',
@@ -576,8 +591,14 @@ export class CfDriver {
           { key: 'a', label: this.lang === 'en' ? 'Always allow' : '总是允许' },
           { key: 'd', label: this.lang === 'en' ? 'Deny' : '拒绝' },
         ],
-        onChoose: (opt) => resolvePromise(opt.key === 'y' ? 'once' : opt.key === 'a' ? 'always' : 'deny'),
-        onCancel: () => resolvePromise('deny'),
+        onChoose: (opt) => {
+          clearTimeout(timer);
+          resolvePromise(opt.key === 'y' ? 'once' : opt.key === 'a' ? 'always' : 'deny');
+        },
+        onCancel: () => {
+          clearTimeout(timer);
+          resolvePromise('deny');
+        },
       });
     });
   }
@@ -585,16 +606,15 @@ export class CfDriver {
   /** 云端权限判定：yolo / 只读 / 已存规则 / 用户确认；「总是允许」会写入浏览器本地配置 */
   private async checkPermission(tool: string, detail: string): Promise<{ allowed: boolean; output?: string }> {
     if (this.yolo || READ_TOOLS.has(tool)) return { allowed: true };
-    const match = (r: string): boolean => detail === r || detail.startsWith(r);
     const perms = this.config.permissions ?? (this.config.permissions = { allow: [], deny: [] });
     const deny = Array.isArray(perms.deny) ? perms.deny : [];
-    if (deny.some(match)) return { allowed: false, output: '（操作被拒绝规则拦截）' };
+    if (deny.some((r) => matchesRule(r, detail))) return { allowed: false, output: '（操作被拒绝规则拦截）' };
     const allow = Array.isArray(perms.allow) ? perms.allow : (perms.allow = []);
-    if (allow.some(match)) return { allowed: true };
+    if (allow.some((r) => matchesRule(r, detail))) return { allowed: true };
     if (tool === 'bash' && isReadOnlyCommand(detail)) return { allowed: true };
     const decision = await this.confirmTool(tool, detail);
     if (decision === 'always') {
-      if (!allow.some(match)) allow.push(detail);
+      if (!allow.some((r) => matchesRule(r, detail))) allow.push(detail);
       this.emitConfig();
       return { allowed: true };
     }
@@ -606,7 +626,11 @@ export class CfDriver {
 
   async send(text: string, voice = false): Promise<void> {
     // 消息级语音标记：语音识别发送时带上（DO 会被回收，不能只依赖 /voice 命令的易失状态）
-    if (voice) this.voiceChat = true;
+    if (voice && !this.voiceChat) {
+      this.voiceChat = true;
+      this.config.general.voiceChat = true;
+      this.emitConfig();
+    }
     if (this.busy || !this.session) return;
     if (this.toolsOn && text.startsWith('!')) {
       await this.directBash(text.slice(1).trim());
@@ -982,7 +1006,9 @@ export class CfDriver {
       }
       case 'yolo':
         this.yolo = !this.yolo;
+        this.config.general.yolo = this.yolo;
         this.ui.setYoloBadge(this.yolo);
+        this.emitConfig();
         this.ui.pushSystem(this.yolo ? 'yolo 模式已开启 —— 所有操作放行' : 'yolo 模式已关闭，操作需要授权');
         return;
       case 'swipe':

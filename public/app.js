@@ -107,24 +107,12 @@
     TOKEN = localStorage.getItem('meowfish-token') || '';
   } catch (e) { /* ignore */ }
 
-  /* ---------- 设备标识（云端多浏览器隔离：每台浏览器独立命名空间） ---------- */
-  var DEVICE_ID = 'default';
-  try {
-    DEVICE_ID = localStorage.getItem('meowfish-device-id') || '';
-    if (!DEVICE_ID) {
-      DEVICE_ID = window.crypto && crypto.randomUUID
-        ? crypto.randomUUID()
-        : 'dev-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
-      localStorage.setItem('meowfish-device-id', DEVICE_ID);
-    }
-  } catch (e) { /* ignore */ }
+  /* ---------- 设备隔离（云端由 HttpOnly Cookie 承载，不再放 URL；本地单用户无需该参数） ---------- */
 
   function withToken(path) {
+    if (!TOKEN) return path;
     var q = path.indexOf('?') >= 0 ? '&' : '?';
-    var parts = [];
-    if (TOKEN) parts.push('token=' + encodeURIComponent(TOKEN));
-    parts.push('device=' + encodeURIComponent(DEVICE_ID));
-    return path + q + parts.join('&');
+    return path + q + 'token=' + encodeURIComponent(TOKEN);
   }
 
   function askToken() {
@@ -1067,13 +1055,14 @@
             var msgs = messagesEl.querySelectorAll('.msg.assistant .bubble');
             if (msgs.length) {
               var lastMsg = msgs[msgs.length - 1];
-              var raw = lastMsg.getAttribute('data-raw') || '';
-              var full = (raw || lastMsg.textContent || '').replace(/\s+/g, ' ').trim();
-              // 去除模型输出的语音标记（气泡显示保持干净）
-              var txt = full.replace(/\{\{\s*voice\b[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
-              lastAssistantText = txt;
-              $('vv-bot-line').textContent = txt;
-              if (lastMsg) lastMsg.textContent = txt;
+              var raw = lastMsg.getAttribute('data-raw') || lastMsg.textContent || '';
+              // 剥离 {{voice: 音色|风格}} 标记（保留换行与 Markdown 结构，气泡重新渲染而不是覆写为纯文本）
+              var clean = raw.replace(/\{\{\s*voice\b[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
+              lastAssistantText = clean;
+              $('vv-bot-line').textContent = clean;
+              var cleanRaw = raw.replace(/\{\{\s*voice\b[^}]*\}\}/g, '').trim();
+              lastMsg.innerHTML = mdToHtml(esc(cleanRaw));
+              lastMsg.removeAttribute('data-raw');
             }
             // 把流式切句未覆盖的残余文本也入队合成
             flushSentenceStream();
@@ -1244,6 +1233,13 @@
 
   function vadTick() {
     if (!voiceActive || !vc) return;
+    // 空闲/朗读/思考阶段只保留最近 8s（80 块）用于 VAD 回看与噪底估计：
+    // 防止长期挂机时 recChunks 无界增长（recording 阶段有 15s 上限与断句裁剪，不在此修剪）
+    if (voiceState !== 'recording' && vc.recChunks.length > 80) {
+      var dropCount = vc.recChunks.length - 80;
+      vc.recChunks.splice(0, dropCount);
+      vc.segStart = Math.max(0, vc.segStart - dropCount);
+    }
     // 直接从最近采集的 PCM 算音量：RMS（动效）+ peak（VAD，更灵敏）
     var chunks = vc.recChunks;
     var tailSamples = 1600; // 最近 0.1s（16kHz）
@@ -1373,8 +1369,12 @@
     }).then(function (res) {
       return res && res.ok ? res.json() : Promise.reject(new Error(res ? res.status : ''));
     }).then(function (j) {
+      if (!vc) return; // 语音模式已在请求期间退出（vc 已释放），丢弃结果
       vc.busy = false;
-      if (!voiceActive) return;
+      if (!voiceActive) {
+        setVoiceStatus('', 'off');
+        return;
+      }
       var text = j && j.text ? String(j.text).trim() : '';
       if (!text) {
         setVoiceStatus(t('voice-listening'), 'listening');

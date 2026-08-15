@@ -228,52 +228,115 @@ export async function webSearch(query: string, count = 5, signal?: AbortSignal):
   return [];
 }
 
+/** 常见云元数据/链路本地主机名（域名形式绕过点分 IP 检查） */
+const PRIVATE_HOSTNAMES = new Set([
+  'metadata.google.internal',
+  'metadata.google.com',
+  'metadata',
+  'instance-data',
+  'instance-data.ec2.internal',
+]);
+
+/** 把 IPv6 地址规范化为 8 组小写十六进制（含嵌入 IPv4 与 :: 压缩），无法解析返回 null */
+function normalizeIpv6(host: string): string | null {
+  let h = host.toLowerCase();
+  const tail = /^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(h);
+  if (tail) {
+    const octets = tail[2]!.split('.').map((n) => Number(n));
+    if (octets.some((n) => n < 0 || n > 255)) return null;
+    h = tail[1]! + ((octets[0]! << 8) | octets[1]!).toString(16) + ':' + ((octets[2]! << 8) | octets[3]!).toString(16);
+  }
+  const halves = h.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0]!.split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1]!.split(':') : [];
+  const valid = (g: string): boolean => /^[0-9a-f]{1,4}$/.test(g);
+  if (!left.every(valid) || !right.every(valid)) return null;
+  const fill = halves.length === 2 ? 8 - left.length - right.length : 8 - left.length;
+  if (fill < 0 || (halves.length === 2 && fill < 1)) return null;
+  const groups = halves.length === 2 ? [...left, ...Array<string>(fill).fill('0'), ...right] : left;
+  if (groups.length !== 8) return null;
+  return groups.map((g) => g.padStart(4, '0')).join(':');
+}
+
 /** 内网/保留地址防护（web_fetch 用，覆盖常见云元数据与内网段） */
 export function isPrivateHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/\.$/, '');
-  if (h === 'localhost' || h === '::1' || h === '::' || h === '0.0.0.0' || h.endsWith('.local')) return true;
-  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  const bare = h.startsWith('[') && h.endsWith(']') ? h.slice(1, -1) : h;
+  if (PRIVATE_HOSTNAMES.has(bare)) return true;
+  // URL 解析器通常会把十进制/十六进制 IPv4 规范化为点分形式，这里再兜底
+  if (/^\d+$/.test(bare) || /^0x[0-9a-f]+$/i.test(bare)) return true;
+  if (bare === 'localhost' || bare === '::1' || bare === '::' || bare === '0.0.0.0' || bare.endsWith('.local')) return true;
+  if (/^127\./.test(bare) || /^10\./.test(bare) || /^192\.168\./.test(bare)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(bare)) return true;
   // 云元数据/链路本地/CGNAT/文档与保留 IPv4
-  if (/^169\.254\./.test(h)) return true;
-  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)) return true;
-  if (/^192\.0\.0\./.test(h) || /^192\.0\.2\./.test(h) || /^198\.18\./.test(h) || /^198\.19\./.test(h)) return true;
-  if (/^198\.51\.100\./.test(h) || /^203\.0\.113\./.test(h)) return true;
-  if (/^22[4-9]\./.test(h) || /^23[0-9]\./.test(h) || /^24[0-9]\./.test(h) || /^25[0-5]\./.test(h)) return true;
-  // IPv6 回环/链路本地/唯一本地/组播/文档段；IPv4 映射地址递归检查内网 IPv4
-  if (h.includes(':')) {
-    if (h.startsWith('::ffff:')) return isPrivateHost(h.slice(7));
-    if (h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe8') || h.startsWith('fe9') || h.startsWith('fea') || h.startsWith('feb')) return true;
-    if (h.startsWith('ff') || h.startsWith('2001:db8:')) return true;
+  if (/^169\.254\./.test(bare)) return true;
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(bare)) return true;
+  if (/^192\.0\.0\./.test(bare) || /^192\.0\.2\./.test(bare) || /^198\.18\./.test(bare) || /^198\.19\./.test(bare)) return true;
+  if (/^198\.51\.100\./.test(bare) || /^203\.0\.113\./.test(bare)) return true;
+  if (/^22[4-9]\./.test(bare) || /^23[0-9]\./.test(bare) || /^24[0-9]\./.test(bare) || /^25[0-5]\./.test(bare)) return true;
+  if (bare.includes(':')) {
+    const v6 = normalizeIpv6(bare);
+    if (!v6) return true; // 无法解析的 IPv6 形式保守拒绝
+    if (v6 === '0000:0000:0000:0000:0000:0000:0000:0000') return true; // ::
+    if (v6 === '0000:0000:0000:0000:0000:0000:0000:0001') return true; // ::1
+    const first = parseInt(v6.slice(0, 4), 16);
+    if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 唯一本地
+    if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 链路本地
+    if ((first & 0xff00) === 0xff00) return true; // ff00::/8 组播
+    if (v6.startsWith('2001:0db8:')) return true; // 2001:db8::/32 文档段
+    // IPv4 映射地址递归检查内网 IPv4
+    const mapped = /^0000:0000:0000:0000:0000:ffff:([0-9a-f]{4}):([0-9a-f]{4})$/.exec(v6);
+    if (mapped) {
+      const a = parseInt(mapped[1]!, 16);
+      const b = parseInt(mapped[2]!, 16);
+      return isPrivateHost(`${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`);
+    }
   }
   return false;
 }
 
-/** 抓取网页正文（去标签，截断到 maxChars；signal 用于用户中断时立即中止） */
+/** 抓取网页正文（去标签，截断到 maxChars；signal 用于用户中断时立即中止；逐跳校验重定向防 SSRF） */
 export async function webFetchPage(url: string, maxChars = 4000, signal?: AbortSignal): Promise<string> {
   if (!/^https?:\/\//i.test(url)) return '（仅支持 http/https 链接）';
-  let host: string;
-  try {
-    host = new URL(url).hostname;
-  } catch {
-    return '（无效的 URL）';
-  }
-  if (isPrivateHost(host)) return '（拒绝访问内网地址）';
-  const ctrl = new AbortController();
-  const combined = signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal;
-  const timer = setTimeout(() => ctrl.abort(), 15_000);
-  try {
-    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html' }, signal: combined });
+  let current = url;
+  for (let hop = 0; hop <= 3; hop++) {
+    let host: string;
+    try {
+      host = new URL(current).hostname;
+    } catch {
+      return '（无效的 URL）';
+    }
+    if (isPrivateHost(host)) return '（拒绝访问内网地址）';
+    const ctrl = new AbortController();
+    const combined = signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal;
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    let res: Response;
+    try {
+      res = await fetch(current, { headers: { 'User-Agent': UA, Accept: 'text/html' }, signal: combined, redirect: 'manual' });
+    } catch (e) {
+      return `（抓取失败: ${e instanceof Error ? e.message : String(e)}）`;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (!loc) return `（HTTP ${res.status}）`;
+      try {
+        current = new URL(loc, current).toString();
+      } catch {
+        return '（无效的跳转地址）';
+      }
+      if (!/^https?:\/\//i.test(current)) return '（仅支持 http/https 链接）';
+      continue;
+    }
     if (!res.ok) return `（HTTP ${res.status}）`;
     const html = await res.text();
     const text = stripTags(html);
     if (!text) return '（页面没有可提取的正文）';
     return text.length > maxChars ? text.slice(0, maxChars) + '\n…（已截断）' : text;
-  } catch (e) {
-    return `（抓取失败: ${e instanceof Error ? e.message : String(e)}）`;
-  } finally {
-    clearTimeout(timer);
   }
+  return '（重定向次数过多）';
 }
 
 export function webSearchTool(): ToolImpl {

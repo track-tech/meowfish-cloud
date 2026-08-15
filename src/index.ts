@@ -29,6 +29,30 @@ interface AppState {
 
 const encoder = new TextEncoder();
 
+/** 设备隔离 Cookie 名（浏览器持久的不可伪造设备凭据；URL 中的 device= 参数不再被信任） */
+export const DEVICE_COOKIE = 'mf_device';
+
+/** 从请求 Cookie 头解析设备凭据；格式非法视为未提供 */
+export function readDeviceCookie(header: string | null): string | null {
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === DEVICE_COOKIE) {
+      const value = part.slice(eq + 1).trim();
+      return /^[a-f0-9-]{16,64}$/i.test(value) ? value : null;
+    }
+  }
+  return null;
+}
+
+/** 构造设备 Cookie（HTTPS 下带 Secure；HttpOnly 防脚本窃取） */
+export function deviceCookieHeader(deviceId: string, https: boolean): string {
+  const attrs = ['Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=31536000'];
+  if (https) attrs.push('Secure');
+  return `${DEVICE_COOKIE}=${deviceId}; ${attrs.join('; ')}`;
+}
+
 export class MeowFishApp {
   private apps = new Map<string, Promise<AppState>>();
 
@@ -126,12 +150,22 @@ export class MeowFishApp {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === '/auth-check') return json({ ok: true });
-    const deviceId = url.searchParams.get('device') || 'default';
-    if (url.pathname === '/events') return this.sseResponse(await this.getApp(deviceId));
-    if (url.pathname.startsWith('/ui/')) return this.uiRoute(url.pathname, request, await this.getApp(deviceId));
+    // 设备隔离凭据只信任 HttpOnly Cookie（客户端随机生成、由浏览器持有；URL 查询参数可被日志/代理泄露）
+    const existing = readDeviceCookie(request.headers.get('Cookie'));
+    const deviceId = existing ?? crypto.randomUUID();
+    let res: Response;
+    if (url.pathname === '/auth-check') res = json({ ok: true });
+    else if (url.pathname === '/events') res = this.sseResponse(await this.getApp(deviceId));
+    else if (url.pathname.startsWith('/ui/')) res = await this.uiRoute(url.pathname, request, await this.getApp(deviceId));
     // 静态资源（前端三件套，assets binding）
-    return this.env.ASSETS.fetch(request);
+    else res = await this.env.ASSETS.fetch(request);
+    // 首次访问下发设备 Cookie（所有响应都带上，保证静态页/SSE/接口拿到同一凭据）
+    if (!existing) {
+      const headers = new Headers(res.headers);
+      headers.append('Set-Cookie', deviceCookieHeader(deviceId, url.protocol === 'https:'));
+      res = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+    }
+    return res;
   }
 
   private async uiRoute(path: string, request: Request, state: AppState): Promise<Response> {

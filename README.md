@@ -1,6 +1,6 @@
 # MeowFish 云端版 ☁️ ฅ(^•ω•^)ฅ
 
-> **MeowFish**（[本地版仓库](https://github.com/track-tech/pi-meowfish-agent)）的 Cloudflare 部署项目，独立发布、独立部署。
+> **MeowFish**（本地版仓库：pi-meowfish-agent，地址创建后补充）的 Cloudflare 部署项目，独立发布、独立部署。
 
 ![version](https://img.shields.io/badge/version-1.0.0-7dd3fc) ![license](https://img.shields.io/badge/license-AGPL--3.0-orange) ![runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-f6821f)
 
