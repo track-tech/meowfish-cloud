@@ -665,10 +665,12 @@ export class CfDriver {
     let streamingReasoning = false;
     for (let iter = 0; iter < 25; iter++) {
       const reqMessages: ChatMessage[] = [systemMsg, ...messages];
+      // 语音对话模式：关闭思考（reasoner 首字太慢，语音场景禁用）
+      const genProfile = this.voiceChat ? { ...this.profile!, thinking: false } : this.profile!;
       const result = await chat(
         {
-          profile: this.profile!,
-          apiKey: this.profile!.apiKey,
+          profile: genProfile,
+          apiKey: genProfile.apiKey,
           tools: toolDefs,
           signal: this.abortCtrl!.signal,
           onEvent: (ev) => {

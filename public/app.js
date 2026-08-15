@@ -1030,20 +1030,27 @@
           break;
         case 'streamStart':
           appendMsg({ role: m.role || 'assistant', name: m.name, content: '', streaming: true });
+          // 语音对话模式：新回复开始 → 重置句子流（解析新回复的音色标记）
+          if (voiceActive && voiceState === 'thinking') resetSentenceStream();
           break;
         case 'delta':
           appendDelta(m.text);
+          // 语音对话模式：句子级流式朗读（生成一句、合成一句，不等整段）
+          if (voiceActive && voiceState === 'thinking') feedSentenceStream(m.text);
           break;
         case 'reasonDelta':
           appendReasonDelta(m.text);
           break;
         case 'streamEnd':
           endStream();
-          // 语音对话模式：回复完成 → 自动朗读最后一条助手消息（边收边播，可打断）
+          // 语音对话模式：回复完成 → 冲刷残余文本，全部朗读完毕回聆听
           if (voiceActive && voiceState === 'thinking') {
             if (vc && vc.suppressSpeak) {
               // 用户在等待回复时插话：旧回复不再朗读，等新回复
               vc.suppressSpeak = false;
+              stopSpeak();
+              sentenceQueue.length = 0;
+              pendingText = '';
               setVoiceStatus(t('voice-listening'), 'listening');
               break;
             }
@@ -1052,31 +1059,14 @@
               var lastMsg = msgs[msgs.length - 1];
               var raw = lastMsg.getAttribute('data-raw') || '';
               var full = (raw || lastMsg.textContent || '').replace(/\s+/g, ' ').trim();
-              // 解析模型输出的语音标记 {{voice: 音色|风格描述}} → TTS 参数；标记本身不朗读
-              var voiceTag = full.match(/\{\{\s*voice\s*:\s*([^|}]+)\|([^}]+)\s*\}\}/);
-              var txt = full;
-              var ttsVoice = undefined;
-              var ttsStyle = undefined;
-              if (voiceTag) {
-                ttsVoice = voiceTag[1].trim() || undefined;
-                ttsStyle = voiceTag[2].trim() || undefined;
-                txt = full.replace(/\{\{\s*voice\s*:\s*[^}]+\}\}/g, '').replace(/\s+/g, ' ').trim();
-              } else {
-                // 没有标记：也去掉裸 {{voice:...}} 残余（模型格式漂移时兜底）
-                txt = full.replace(/\{\{\s*voice\b[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
-              }
-              if (txt) {
-                lastAssistantText = txt;
-                $('vv-bot-line').textContent = txt;
-                // 气泡显示也去掉语音标记（文字界面保持干净）
-                if (lastMsg && voiceTag) {
-                  lastMsg.textContent = txt;
-                }
-                speakText(txt, ttsVoice, ttsStyle);
-              } else {
-                setVoiceStatus(t('voice-listening'), 'listening');
-              }
+              // 去除模型输出的语音标记（气泡显示保持干净）
+              var txt = full.replace(/\{\{\s*voice\b[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
+              lastAssistantText = txt;
+              $('vv-bot-line').textContent = txt;
+              if (lastMsg) lastMsg.textContent = txt;
             }
+            // 把流式切句未覆盖的残余文本也入队合成
+            flushSentenceStream();
           }
           break;
         case 'streamFail':
@@ -1209,6 +1199,8 @@
     voiceActive = false;
     stopSpeak();
     stopVadLoop();
+    sentenceQueue.length = 0;
+    pendingText = '';
     // 通知服务端退出语音对话模式
     post('/ui/command', { line: '/voice off' });
     if (vc) {
@@ -1282,47 +1274,55 @@
     }
     var th = vc.vadTh;
     // 语音判定：peak 超阈值即算有声（比纯 RMS 灵敏，远麦轻声也能触发）
-    var voiced = effPeak > th || micRms > th * 0.7;
+    // speaking 时用更严阈值：麦克风音量需明显盖过扬声器（防外放回声自我打断）
+    var speakTh = voiceState === 'speaking' ? Math.max(th, playRms * 1.8, 0.03) : th;
+    var voiced = effPeak > speakTh || micRms > speakTh * 0.7;
     if (voiced) { vc.vadSpeech++; vc.vadSilence = 0; }
     else { vc.vadSilence++; vc.vadSpeech = 0; }
 
     switch (voiceState) {
       case 'listening':
-        // 连续 0.3s 有声 → 开始记录句子
-        if (vc.vadSpeech >= 3) {
+        // 连续 0.2s 有声 → 开始记录句子
+        if (vc.vadSpeech >= 2) {
           vc.vadSpeech = 0;
           vc.vadSilence = 0;
-          vc.segStart = vc.recChunks.length;
+          // 回退 4 个采集块（约 0.5s）：VAD 确认有滞后，把语音开头也包含进录音
+          vc.segStart = Math.max(0, vc.recChunks.length - 4);
           vc.segLen = 0;
           setVoiceStatus(t('voice-recording'), 'recording');
         }
         break;
       case 'recording':
-        // 静音 0.9s 或句子超 15s → 断句识别
-        if (vc.vadSilence >= 9 || vc.segLen >= (vc.micCtx.sampleRate || 16000) * 15) {
+        // 静音 0.3s 或句子超 15s → 断句识别（低延迟：说完稍顿即识别）
+        if (vc.vadSilence >= 3 || vc.segLen >= (vc.micCtx.sampleRate || 16000) * 15) {
           vc.vadSilence = 0;
           vc.vadSpeech = 0;
           transcribeSegment();
         }
         break;
       case 'thinking':
-        // 思考中用户直接说话 → 转入录音（旧回复到达时不再朗读，避免抢话）
-        if (vc.vadSpeech >= 3) {
+        // 思考中用户直接说话 → 转入录音（停止旧回复朗读，等待中的旧回复到达时不再朗读）
+        if (vc.vadSpeech >= 2) {
           vc.vadSpeech = 0;
           vc.vadSilence = 0;
-          vc.segStart = vc.recChunks.length;
+          stopSpeak();
+          sentenceQueue.length = 0;
+          pendingText = '';
+          vc.segStart = Math.max(0, vc.recChunks.length - 4);
           vc.segLen = 0;
           vc.suppressSpeak = true; // 标记：正在等待的旧回复到达时跳过朗读
           setVoiceStatus(t('voice-recording'), 'recording');
         }
         break;
       case 'speaking':
-        // 朗读中检测到用户说话（连续 0.2s）→ 打断，立即转入记录
+        // 朗读中检测到用户说话（连续 0.2s，且音量盖过扬声器）→ 打断，立即转入记录
         if (vc.vadSpeech >= 2) {
           vc.vadSpeech = 0;
           vc.vadSilence = 0;
           stopSpeak();
-          vc.segStart = vc.recChunks.length;
+          sentenceQueue.length = 0;
+          pendingText = '';
+          vc.segStart = Math.max(0, vc.recChunks.length - 4);
           vc.segLen = 0;
           setVoiceStatus(t('voice-recording'), 'recording');
         }
@@ -1382,20 +1382,74 @@
     });
   }
 
-  /* ---- 朗读：SSE 流式 PCM16 → 边收边播（可打断） ---- */
-  var speakToken = 0; // 打断令牌：递增后旧流的所有块全部丢弃
-  function speakText(text, ttsVoice, ttsStyle) {
+  /* ---- 朗读：句子级流式（模型边生成边合成，首句延迟最小化） ---- */
+  var speakToken = 0;        // 打断令牌：递增后旧流的所有块全部丢弃
+  var speakQueue = [];       // 待播放 PCM AudioBuffer（全局串行）
+  var speakSource = null;    // 当前播放源
+  var sentenceQueue = [];    // 待合成句子 {text, voice, style}
+  var sentenceBusy = false;  // 是否有 TTS 请求进行中
+  var sentenceVoice = '';    // 当前回复的音色（从 {{voice}} 标记解析）
+  var sentenceStyle = '';    // 当前回复的风格
+  var pendingText = '';      // 模型流式输出累积（切句缓冲）
+
+  /* 进入新回复：重置句子状态 */
+  function resetSentenceStream() {
+    pendingText = '';
+    sentenceVoice = '';
+    sentenceStyle = '';
+    stopSpeak();             // 丢弃上一回复未播完的音频
+  }
+
+  /* 流式增量：累积文本 → 解析标记 → 按句切分 → 逐句入队合成 */
+  function feedSentenceStream(delta) {
     if (!voiceActive) return;
-    stopSpeak();
-    var myToken = ++speakToken;
-    // 保险：确保播放上下文 running（浏览器偶尔会在后台挂起）
+    pendingText += delta;
+    // 解析 {{voice: 音色|风格}}（模型应放开头；若跨块到达也能解析）
+    if (!sentenceVoice) {
+      var tag = pendingText.match(/\{\{\s*voice\s*:\s*([^|}]+)\|([^}]+)\s*\}\}/);
+      if (tag) {
+        sentenceVoice = tag[1].trim();
+        sentenceStyle = tag[2].trim();
+        pendingText = pendingText.replace(/\{\{\s*voice\s*:\s*[^}]+\}\}/g, '').replace(/\s+/g, ' ').trim();
+      }
+    }
+    // 标记尚未完整到达（跨块）：先不切句，等标记收齐
+    if (pendingText.indexOf('{{voice') >= 0 && pendingText.indexOf('}}') < 0) return;
+    // 按标点切句（。！？…；换行也切）
+    var cut = pendingText.match(/[^。！？…；\n]*[。！？…；\n]/);
+    while (cut) {
+      var sent = cut[0].trim();
+      pendingText = pendingText.slice(cut[0].length).replace(/^\s+/, '');
+      if (sent) enqueueSentence(sent);
+      cut = pendingText.match(/[^。！？…；\n]*[。！？…；\n]/);
+    }
+  }
+
+  /* 回复结束：把残余文本也合成 */
+  function flushSentenceStream() {
+    var rest = pendingText.trim();
+    pendingText = '';
+    if (rest) enqueueSentence(rest);
+  }
+
+  function enqueueSentence(text) {
+    if (!voiceActive) return;
+    sentenceQueue.push({ text: text, voice: sentenceVoice, style: sentenceStyle });
+    pumpSentence();
+  }
+
+  /* 串行流水线：上一句 TTS 流结束立即发下一句（不等播放完），块进全局队列连续播放 */
+  function pumpSentence() {
+    if (sentenceBusy || !sentenceQueue.length || !voiceActive) return;
+    var item = sentenceQueue.shift();
+    sentenceBusy = true;
+    setVoiceStatus(t('voice-speaking'), 'speaking');
     try {
       if (audioCtx && audioCtx.state === 'suspended') void audioCtx.resume();
     } catch (e) { /* ignore */ }
-    setVoiceStatus(t('voice-speaking'), 'speaking');
-    var payload = { text: text };
-    if (ttsVoice) payload.voice = ttsVoice;
-    if (ttsStyle) payload.style = ttsStyle;
+    var payload = { text: item.text };
+    if (item.voice) payload.voice = item.voice;
+    if (item.style) payload.style = item.style;
     fetch(withToken('/ui/voice-tts'), {
       method: 'POST',
       headers: voiceHeaders(),
@@ -1407,7 +1461,7 @@
       var buf = '';
       function pump() {
         return reader.read().then(function (r) {
-          if (r.done) return;
+          if (r.done) { sentenceBusy = false; pumpSentence(); return; }
           buf += decoder.decode(r.value, { stream: true });
           var idx;
           while ((idx = buf.indexOf('\n\n')) >= 0) {
@@ -1415,21 +1469,23 @@
             buf = buf.slice(idx + 2);
             frame.split('\n').forEach(function (line) {
               if (!line.startsWith('data:')) return;
-              var payload = line.slice(5).trim();
-              if (!payload || payload === '[DONE]') return;
+              var payload2 = line.slice(5).trim();
+              if (!payload2 || payload2 === '[DONE]') return;
               try {
-                var m = JSON.parse(payload);
+                var m = JSON.parse(payload2);
                 if (m.error) throw new Error(m.error);
-                if (m.pcm) queuePcm(m.pcm, myToken);
+                if (m.pcm) queuePcm(m.pcm, speakToken);
               } catch (e) { /* skip */ }
             });
           }
           return pump();
         });
       }
-      return pump().catch(function () { /* stream closed */ });
+      return pump().catch(function () { sentenceBusy = false; pumpSentence(); });
     }).catch(function (e) {
-      if (voiceActive && speakToken === myToken) pushToast(t('voice-fail') + (e instanceof Error ? e.message : ''));
+      sentenceBusy = false;
+      if (voiceActive) pushToast(t('voice-fail') + (e instanceof Error ? e.message : ''));
+      pumpSentence();
     });
   }
 
@@ -1442,7 +1498,7 @@
       var buffer = audioCtx.createBuffer(1, pcm.length, 24000);
       var data = buffer.getChannelData(0);
       for (var j = 0; j < pcm.length; j++) data[j] = pcm[j] / 32768;
-      // 先入队，再启动播放：保证第一块也被播放（旧 bug：直接 playNext 从空队列取 undefined → 永远无声）
+      // 先入队，再启动播放：保证第一块也被播放
       speakQueue.push(buffer);
       if (!speakSource) playNext(token);
     } catch (e) { /* ignore bad chunk */ }
@@ -1452,8 +1508,10 @@
     if (!voiceActive || token !== speakToken) return;
     if (!speakQueue.length) {
       speakSource = null;
-      // 读完：回聆听（等待下一句或回复）
-      if (voiceState === 'speaking') setVoiceStatus(t('voice-listening'), 'listening');
+      // 音频队列读完且无待合成句子：回聆听
+      if (voiceState === 'speaking' && !sentenceBusy && !sentenceQueue.length) {
+        setVoiceStatus(t('voice-listening'), 'listening');
+      }
       return;
     }
     var buffer = speakQueue.shift();
