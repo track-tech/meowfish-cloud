@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=40">
+  <link rel="stylesheet" href="/style.css?v=41">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -130,7 +130,7 @@
 
   <!-- Web SSH 交互式终端（全屏覆盖层，body 顶层保证盖住侧边栏） -->
   <div id="ssh-term-view" class="hidden">
-    <div class="ssh-term-top">
+    <div id="ssh-term-top" class="ssh-term-top">
       <span class="ssh-term-title">🖥️ SSH 终端</span>
       <div id="ssh-term-tabs" class="ssh-term-tabs"></div>
       <button id="ssh-term-new" class="pill" type="button" title="新建连接">＋</button>
@@ -141,6 +141,7 @@
       <button id="ssh-term-reconnect" class="pill" type="button">重连</button>
       <button id="ssh-term-clear" class="pill" type="button" title="清屏">清屏</button>
       <button id="ssh-term-reconfig" class="pill" type="button">连接设置</button>
+      <button id="ssh-term-max" class="pill" type="button" title="最大化/还原">▢</button>
       <button id="ssh-term-exit" class="pill" type="button">退出</button>
     </div>
     <div id="ssh-term-findbar" class="hidden">
@@ -152,9 +153,10 @@
     <div id="ssh-term-screen">
       <pre id="ssh-term-output" tabindex="-1"></pre>
     </div>
+    <div id="ssh-term-resize" title="拖动调整大小"></div>
     <textarea id="ssh-term-input" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
   </div>
 
-  <script src="/app.js?v=40"></script>
+  <script src="/app.js?v=41"></script>
 </body>
 </html>

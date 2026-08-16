@@ -1168,6 +1168,8 @@
   var termFindQuery = '';
   var termFindIdx = 0;
   var termPendingInput = '';
+  var TERM_GEOM_KEY = 'meowfish-sshterm-geom';
+  var termMax = false;
 
   function activeTerm() { return termTabs[termActiveIdx] || null; }
 
@@ -1644,10 +1646,64 @@
     connectTermTab(tab, cfg);
   }
 
+  function loadTermGeom() {
+    try {
+      var g = JSON.parse(localStorage.getItem(TERM_GEOM_KEY) || 'null');
+      if (g && typeof g.x === 'number' && typeof g.y === 'number' && typeof g.w === 'number' && typeof g.h === 'number') return g;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function saveTermGeom() {
+    if (termMax) return;
+    try {
+      var v = $('ssh-term-view');
+      var r = v.getBoundingClientRect();
+      if (r.width > 100 && r.height > 100) {
+        localStorage.setItem(TERM_GEOM_KEY, JSON.stringify({ x: r.left, y: r.top, w: r.width, h: r.height }));
+      }
+    } catch (e) { /* ignore */ }
+  }
+  function clampTermGeom() {
+    var v = $('ssh-term-view');
+    if (!v || termMax) return;
+    var r = v.getBoundingClientRect();
+    var w = Math.min(r.width, window.innerWidth - 16);
+    var h = Math.min(r.height, window.innerHeight - 16);
+    var x = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    var y = Math.max(8, Math.min(r.top, window.innerHeight - h - 8));
+    if (w !== r.width) v.style.width = w + 'px';
+    if (h !== r.height) v.style.height = h + 'px';
+    v.style.left = x + 'px';
+    v.style.top = y + 'px';
+  }
+  function applyTermGeom() {
+    var v = $('ssh-term-view');
+    var g = loadTermGeom();
+    if (g) {
+      v.style.left = g.x + 'px';
+      v.style.top = g.y + 'px';
+      v.style.width = g.w + 'px';
+      v.style.height = g.h + 'px';
+    } else {
+      v.style.left = '';
+      v.style.top = '';
+      v.style.width = '';
+      v.style.height = '';
+    }
+    clampTermGeom();
+  }
+  function toggleTermMax() {
+    var v = $('ssh-term-view');
+    termMax = !termMax;
+    v.classList.toggle('max', termMax);
+    if (!termMax) applyTermGeom();
+  }
+
   function showTermView() {
     termActive = true;
     $('ssh-term-view').classList.remove('hidden');
     document.body.classList.add('term-active');
+    applyTermGeom();
     renderTermTabs();
     renderTermStatus();
     if (activeTerm()) renderTermBuffer(activeTerm());
@@ -1655,6 +1711,7 @@
   }
   function termInputEl() { return $('ssh-term-input'); }
   function exitSshTerminal() {
+    saveTermGeom();
     termActive = false;
     termTabs.forEach(function (t) { closeTabWs(t); });
     termTabs = [];
@@ -2571,6 +2628,7 @@
   $('ssh-term-exit').addEventListener('click', exitSshTerminal);
   $('ssh-term-reconfig').addEventListener('click', function () { openSshTermForm(false); });
   $('ssh-term-new').addEventListener('click', function () { openSshTermForm(true); });
+  $('ssh-term-max').addEventListener('click', toggleTermMax);
   $('ssh-term-clear').addEventListener('click', clearActiveTerm);
   $('ssh-term-reconnect').addEventListener('click', reconnectActiveTerm);
   $('ssh-term-send').addEventListener('click', sendActiveTermToBot);
@@ -2582,6 +2640,49 @@
   $('ssh-term-find-input').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); termFindStep(e.shiftKey ? -1 : 1); }
     else if (e.key === 'Escape') { termFindClose(); termInputEl().focus(); }
+  });
+  // ---- 浮动窗口：标题栏拖动 + 右下角缩放 + 双击最大化/还原 ----
+  var termDrag = null;
+  $('ssh-term-top').addEventListener('pointerdown', function (e) {
+    if (termMax) return;
+    if (e.target.closest('button, input, .ssh-term-tab, .ssh-term-tabs')) return;
+    var v = $('ssh-term-view');
+    var r = v.getBoundingClientRect();
+    termDrag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    e.preventDefault();
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!termDrag) return;
+    var v = $('ssh-term-view');
+    v.style.left = Math.max(8, Math.min(e.clientX - termDrag.dx, window.innerWidth - v.offsetWidth - 8)) + 'px';
+    v.style.top = Math.max(8, Math.min(e.clientY - termDrag.dy, window.innerHeight - v.offsetHeight - 8)) + 'px';
+  });
+  window.addEventListener('pointerup', function () {
+    if (termDrag) { termDrag = null; saveTermGeom(); }
+  });
+  $('ssh-term-top').addEventListener('dblclick', function (e) {
+    if (!e.target.closest('button, input, .ssh-term-tab, .ssh-term-tabs')) toggleTermMax();
+  });
+  var termResize = null;
+  $('ssh-term-resize').addEventListener('pointerdown', function (e) {
+    if (termMax) return;
+    var v = $('ssh-term-view');
+    var r = v.getBoundingClientRect();
+    termResize = { sx: e.clientX, sy: e.clientY, w: r.width, h: r.height };
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!termResize) return;
+    var v = $('ssh-term-view');
+    v.style.width = Math.max(420, Math.min(termResize.w + e.clientX - termResize.sx, window.innerWidth - 8)) + 'px';
+    v.style.height = Math.max(260, Math.min(termResize.h + e.clientY - termResize.sy, window.innerHeight - 8)) + 'px';
+  });
+  window.addEventListener('pointerup', function () {
+    if (termResize) { termResize = null; saveTermGeom(); }
+  });
+  window.addEventListener('resize', function () {
+    if (termActive) clampTermGeom();
   });
   $('ssh-term-screen').addEventListener('click', function () { termInputEl().focus(); });
   termInputEl().addEventListener('keydown', function (e) {

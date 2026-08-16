@@ -1695,15 +1695,34 @@ html, body {
 /* 管理模式栏出现动画 */
 #manage-bar:not(.hidden) { animation: barIn 0.2s ease both; }
 
-/* ---- Web SSH 终端 ---- */
+/* ---- Web SSH 终端（可拖动/缩放的浮动窗口，像 Linux 桌面终端） ---- */
 #ssh-term-view {
   position: fixed;
-  inset: 0;
-  z-index: 80;
+  top: 48px;
+  left: 96px;
+  width: 980px;
+  height: 620px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  z-index: 90;
   display: flex;
   flex-direction: column;
   background: #0d1117;
   color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+#ssh-term-view.max {
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  border: none;
 }
 #ssh-term-view .ssh-term-top {
   display: flex;
@@ -1713,7 +1732,22 @@ html, body {
   border-bottom: 1px solid #30363d;
   background: #161b22;
   flex: none;
+  cursor: move;
+  user-select: none;
 }
+#ssh-term-view .ssh-term-top button,
+#ssh-term-view .ssh-term-top .ssh-term-tab,
+#ssh-term-view .ssh-term-top input { cursor: default; }
+#ssh-term-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 45%, #30363d 45%, #30363d 55%, transparent 55%);
+}
+#ssh-term-view.max #ssh-term-resize { display: none; }
 #ssh-term-view .ssh-term-title { font-weight: 700; color: #e6edf3; }
 #ssh-term-view .ssh-term-status { font-size: 0.85rem; color: #8b949e; }
 #ssh-term-view .ssh-term-status.on { color: #3fb950; }
