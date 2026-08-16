@@ -2666,10 +2666,19 @@
   // ---- 快捷栏「更多」二级菜单 ----
   $('quickbar-more').addEventListener('click', function (e) {
     e.stopPropagation();
-    $('quickbar-menu').classList.toggle('hidden');
+    var menu = $('quickbar-menu');
+    menu.classList.toggle('hidden');
+    if (!menu.classList.contains('hidden')) {
+      var r = $('quickbar-more').getBoundingClientRect();
+      var w = menu.offsetWidth || 180;
+      var left = r.right - w;
+      if (left < 8) left = 8;
+      menu.style.left = left + 'px';
+      menu.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+    }
   });
   document.addEventListener('click', function (e) {
-    if (!e.target.closest('.quickbar-more-wrap')) $('quickbar-menu').classList.add('hidden');
+    if (!e.target.closest('.quickbar-more-wrap') && !e.target.closest('#quickbar-menu')) $('quickbar-menu').classList.add('hidden');
   });
   document.querySelectorAll('#quickbar-menu button').forEach(function (btn) {
     btn.addEventListener('click', function () {
