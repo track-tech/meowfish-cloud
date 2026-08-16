@@ -5,12 +5,12 @@
   /* ---------- 国际化（zh / en，本地存储记住选择） ---------- */
   var I18N = {
     zh: {
-      'manage': '管理', 'done': '完成', 'new-chat': '＋ 新建对话',
+      'manage': '管理', 'done': '完成', 'new-chat': '新建对话',
       'select-all': '全选', 'cancel': '取消', 'delete-selected': '删除所选',
       'model': '模型', 'theme': '主题', 'menu': '菜单',
-      'regenerate': '🔄 重生成', 'continue': '✍️ 续写', 'character': '🐱 角色',
-      'profile': '📝 设定', 'tools': '🛠️ 工具', 'search': '🔍 搜索', 'sshterm': '🖥️ 终端',
-      'export': '⬇️ 导出', 'help': '❓ 帮助', 'abort': '⏹ 中断',
+      'regenerate': '重生成', 'continue': '续写', 'character': '角色',
+      'profile': '设定', 'tools': '工具', 'search': '搜索', 'sshterm': '终端',
+      'export': '导出', 'help': '帮助', 'abort': '中断',
       'input-placeholder': '输入消息…（@ 引用文件 · / 命令）',
       'send': '发送', 'no-match': '（无匹配项）', 'close': '关闭', 'confirm': '确认',
       'status-thinking': '思考中…', 'status-streaming': '输出中', 'status-tool': '工具运行中',
@@ -26,7 +26,7 @@
       'voice-hint': '直接说话即可 · 说完停顿会自动发送 · 朗读时开口可打断',
       'mic-hold': '按住说话（松开识别）', 'mic-listening': '正在聆听…松开结束',
       'mic-working': '正在识别…', 'mic-no-key': '未配置 MiMo API Key：点「设置 → 实时语音（MiMo）」填写',
-      'mic-fail': '识别失败：', 'voice-fail': '朗读失败：', 'voice-play': '🔊 朗读',
+      'mic-fail': '识别失败：', 'voice-fail': '朗读失败：', 'voice-play': '朗读',
       'daynight': '白日 / 暗夜切换（浅滩 ↔ 深海）',
       'time-now': '刚刚', 'time-min': ' 分钟前', 'time-hour': ' 小时前', 'time-yesterday': '昨天', 'time-day': '{m}月{d}日',
       'tooltips': {
@@ -38,9 +38,9 @@
       'manage': 'Manage', 'done': 'Done', 'new-chat': '＋ New Chat',
       'select-all': 'Select All', 'cancel': 'Cancel', 'delete-selected': 'Delete Selected',
       'model': 'Model', 'theme': 'Theme', 'menu': 'Menu',
-      'regenerate': '🔄 Regenerate', 'continue': '✍️ Continue', 'character': '🐱 Character',
-      'profile': '📝 Profile', 'tools': '🛠️ Tools', 'search': '🔍 Search', 'sshterm': '🖥️ Terminal',
-      'export': '⬇️ Export', 'help': '❓ Help', 'abort': '⏹ Abort',
+      'regenerate': 'Regenerate', 'continue': 'Continue', 'character': 'Character',
+      'profile': 'Profile', 'tools': 'Tools', 'search': 'Search', 'sshterm': 'Terminal',
+      'export': 'Export', 'help': 'Help', 'abort': 'Abort',
       'input-placeholder': 'Type a message… (@ reference · / commands)',
       'send': 'Send', 'no-match': '（no match）', 'close': 'Close', 'confirm': 'OK',
       'status-thinking': 'Thinking…', 'status-streaming': 'Writing', 'status-tool': 'Tool running',
@@ -56,7 +56,7 @@
       'voice-hint': 'Just talk · pause to send · interrupt anytime',
       'mic-hold': 'Hold to talk (release to transcribe)', 'mic-listening': 'Listening… release to finish',
       'mic-working': 'Transcribing…', 'mic-no-key': 'MiMo API Key not set: Settings → Voice (MiMo)',
-      'mic-fail': 'Recognition failed: ', 'voice-fail': 'Read-aloud failed: ', 'voice-play': '🔊 Read',
+      'mic-fail': 'Recognition failed: ', 'voice-fail': 'Read-aloud failed: ', 'voice-play': 'Read',
       'daynight': 'Day / Night toggle (Shoal ↔ Deep Sea)',
       'time-now': 'just now', 'time-min': 'm ago', 'time-hour': 'h ago', 'time-yesterday': 'Yesterday', 'time-day': '{m}/{d}',
       'tooltips': {
@@ -261,10 +261,10 @@
       return (
         '<div class="msg tool collapsed' + (m.error ? ' error' : '') + '">' +
         '<div class="tool-head">' +
-        '<span class="tool-caret">▸</span>' +
-        '<span class="tool-label">⚙ ' + esc(m.toolLabel || '') + '</span>' +
+        '<span class="tool-caret"><svg class="ico ico-sm" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg></span>' +
+        '<span class="tool-label"><svg class="ico ico-sm tool-label-ico" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg> ' + esc(m.toolLabel || '') + '</span>' +
         '<span class="tool-summary">' + esc(summary) + '</span>' +
-        (termCmd ? '<button class="term-run-btn" data-cmd="' + esc(termCmd) + '" title="在 SSH 终端中执行">▶ 终端执行</button>' : '') +
+        (termCmd ? '<button class="term-run-btn" data-cmd="' + esc(termCmd) + '" title="在 SSH 终端中执行"><svg class="ico ico-sm" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> 终端执行</button>' : '') +
         '</div>' +
         '<pre class="tool-body">' + esc(m.content) + '</pre></div>'
       );
@@ -280,7 +280,7 @@
     if (m.reasoning) {
       reasonBlock =
         '<div class="reason collapsed">' +
-        '<div class="reason-head"><span class="tool-caret">▸</span>💭 思考过程 <span class="reason-len">(' + m.reasoning.length + ' 字)</span></div>' +
+        '<div class="reason-head"><span class="tool-caret"><svg class="ico ico-sm" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg></span><svg class="ico ico-sm" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"></path></svg> 思考过程 <span class="reason-len">(' + m.reasoning.length + ' 字)</span></div>' +
         '<div class="reason-body">' + esc(m.reasoning) + '</div>' +
         '</div>';
     }
@@ -384,7 +384,7 @@
       var div = document.createElement('div');
       div.innerHTML =
         '<div class="reason collapsed">' +
-        '<div class="reason-head"><span class="tool-caret">▸</span>💭 思考过程 <span class="reason-len"></span></div>' +
+        '<div class="reason-head"><span class="tool-caret"><svg class="ico ico-sm" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg></span><svg class="ico ico-sm" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"></path></svg> 思考过程 <span class="reason-len"></span></div>' +
         '<div class="reason-body"></div>' +
         '</div>';
       var bubble = last.querySelector('.bubble');
@@ -487,11 +487,12 @@
       r.setProperty('--glass-shadow', '0 10px 32px rgba(0, 0, 0, 0.5)');
     }
     // 白日/暗夜按钮图标跟随当前主题明暗（顶栏 + 移动端快捷栏两处）
-    var lightIcon = light ? '☀️' : '🌙';
+    var sunSvg = '<svg class="ico ico-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
+    var moonSvg = '<svg class="ico ico-sm" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
     var dn = $('btn-daynight');
-    if (dn) dn.textContent = lightIcon;
+    if (dn) dn.innerHTML = light ? sunSvg : moonSvg;
     var dnm = $('btn-daynight-mob');
-    if (dnm) dnm.textContent = lightIcon;
+    if (dnm) dnm.innerHTML = light ? sunSvg : moonSvg;
   }
 
   function isLightHex(hex) {
@@ -580,7 +581,7 @@
           if (titleEl && s) {
             titleEl.innerHTML =
               (active ? '<span class="cur-tag">' + t('current') + '</span>' : '') +
-              (active && meta.tools ? '<span class="tools-mark" title="⚙">⚙</span>' : '') +
+              (active && meta.tools ? '<span class="tools-mark" title="Agent"><svg class="ico ico-sm" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg></span>' : '') +
               esc(s.title || t('empty-session'));
           }
         });
@@ -603,14 +604,14 @@
         '<div class="session-main">' +
         '<div class="session-title">' +
         (isCurrent ? '<span class="cur-tag">' + t('current') + '</span>' : '') +
-        (s.id === meta.sessionId && meta.tools ? '<span class="tools-mark" title="⚙">⚙</span>' : '') +
+        (s.id === meta.sessionId && meta.tools ? '<span class="tools-mark" title="Agent"><svg class="ico ico-sm" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg></span>' : '') +
         esc(s.title || t('empty-session')) +
         '</div>' +
         '<div class="session-meta">' + esc(relTime(s.updatedAt)) + '</div>' +
         '</div>' +
         (manageMode ? '' :
-          '<button class="session-pin' + (pinned ? ' pinned' : '') + '" title="' + t('pin') + '">📌</button>' +
-          '<button class="session-del" title="' + t('delete-session') + '">×</button>') +
+          '<button class="session-pin' + (pinned ? ' pinned' : '') + '" title="' + t('pin') + '"><svg class="ico ico-sm" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>' +
+          '<button class="session-del" title="' + t('delete-session') + '"><svg class="ico ico-sm" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>') +
         '</div>'
       );
     }).join('') || '<div class="session-empty">' + t('no-sessions') + '</div>';

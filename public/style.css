@@ -71,6 +71,23 @@ body {
   position: relative;
 }
 
+/* ---- 统一线性矢量图标 ---- */
+.ico {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ico-sm { width: 13px; height: 13px; }
+.ico-lg { width: 18px; height: 18px; }
+#quickbar button svg.ico { margin-right: 5px; }
+#quickbar button.mob-only svg.ico { margin-right: 5px; }
+
 /* ---- 玻璃面板基类 ---- */
 .glass {
   background: var(--glass-bg);
@@ -403,6 +420,18 @@ html.light #session-search { background: rgba(255, 255, 255, 0.7); color: #1f232
   z-index: 4;
 }
 
+.session-pin,
+.session-del {
+  display: inline-grid;
+  place-items: center;
+}
+.session-pin.pinned svg { fill: currentColor; }
+.tools-mark { display: inline-flex; align-items: center; }
+.tool-label-ico { vertical-align: -2px; }
+.reason-head svg.ico { vertical-align: -2px; }
+#btn-send svg { width: 16px; height: 16px; }
+#btn-mic svg { width: 18px; height: 18px; }
+
 /* ---- 主区 ---- */
 #main {
   position: relative;
@@ -455,6 +484,9 @@ html.light #session-search { background: rgba(255, 255, 255, 0.7); color: #1f232
 .spacer { flex: 1; }
 
 .pill, #quickbar button, #btn-send, .modal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: rgba(255, 255, 255, 0.06);
   color: var(--accent);
   border: 1px solid var(--glass-border);
