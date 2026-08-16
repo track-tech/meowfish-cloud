@@ -7,7 +7,7 @@
     zh: {
       'manage': '管理', 'done': '完成', 'new-chat': '新建对话',
       'select-all': '全选', 'cancel': '取消', 'delete-selected': '删除所选',
-      'model': '模型', 'theme': '主题', 'menu': '菜单',
+      'model': '模型', 'theme': '主题', 'menu': '菜单', 'more': '更多', 'daynight-short': '日夜',
       'regenerate': '重生成', 'continue': '续写', 'character': '角色',
       'profile': '设定', 'tools': '工具', 'search': '搜索', 'sshterm': '终端',
       'export': '导出', 'help': '帮助', 'abort': '中断',
@@ -37,7 +37,7 @@
     en: {
       'manage': 'Manage', 'done': 'Done', 'new-chat': '＋ New Chat',
       'select-all': 'Select All', 'cancel': 'Cancel', 'delete-selected': 'Delete Selected',
-      'model': 'Model', 'theme': 'Theme', 'menu': 'Menu',
+      'model': 'Model', 'theme': 'Theme', 'menu': 'Menu', 'more': 'More', 'daynight-short': 'Day/Night',
       'regenerate': 'Regenerate', 'continue': 'Continue', 'character': 'Character',
       'profile': 'Profile', 'tools': 'Tools', 'search': 'Search', 'sshterm': 'Terminal',
       'export': 'Export', 'help': 'Help', 'abort': 'Abort',
@@ -2656,11 +2656,26 @@
   $('btn-daynight-mob').addEventListener('click', function () { post('/ui/command', { line: '/daynight' }); });
   $('btn-theme').addEventListener('click', function () { post('/ui/command', { line: '/theme' }); });
   $('btn-menu').addEventListener('click', function () { post('/ui/command', { line: '/config' }); });
-  document.querySelectorAll('#quickbar button[data-cmd]').forEach(function (btn) {
+  document.querySelectorAll('#quickbar > button[data-cmd]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var cmd = btn.getAttribute('data-cmd');
       if (cmd === '/sshterm') openSshTerminal();
       else post('/ui/command', { line: cmd });
+    });
+  });
+  // ---- 快捷栏「更多」二级菜单 ----
+  $('quickbar-more').addEventListener('click', function (e) {
+    e.stopPropagation();
+    $('quickbar-menu').classList.toggle('hidden');
+  });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.quickbar-more-wrap')) $('quickbar-menu').classList.add('hidden');
+  });
+  document.querySelectorAll('#quickbar-menu button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      $('quickbar-menu').classList.add('hidden');
+      var cmd = btn.getAttribute('data-cmd');
+      if (cmd && cmd !== '/sshterm') post('/ui/command', { line: cmd });
     });
   });
   $('modal-backdrop').addEventListener('click', function (e) {

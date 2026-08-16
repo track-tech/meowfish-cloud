@@ -943,6 +943,52 @@ html.light #session-search { background: rgba(255, 255, 255, 0.7); color: #1f232
 
 #quickbar button:active { transform: scale(0.95); }
 
+.quickbar-more-wrap {
+  position: relative;
+  flex: none;
+  display: flex;
+}
+#quickbar-more.more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 10px;
+}
+.quickbar-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--glass-bg, rgba(18, 22, 32, 0.95));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow, 0 12px 32px rgba(0, 0, 0, 0.4));
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+.quickbar-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.quickbar-menu button:hover { background: rgba(var(--accent-rgb), 0.14); color: var(--accent); }
+html.light .quickbar-menu { background: rgba(255, 255, 255, 0.96); }
+html.light .quickbar-menu button { color: #1f2328; }
+
 #quickbar button.abort {
   color: var(--error);
   background: rgba(243, 139, 168, 0.1);
