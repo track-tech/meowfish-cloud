@@ -223,6 +223,8 @@ export class CfDriver {
   cards: { name: string; data: CharacterCard }[] = [];
   private abortCtrl: AbortController | null = null;
   private yolo = false;
+  /** 生成令牌：切换会话/新建会话时递增，旧生成的所有 UI/落库操作立即失效，防止对话串台 */
+  private genToken = 0;
 
   constructor(
     private ui: WebUi,
@@ -714,17 +716,20 @@ export class CfDriver {
       return;
     }
     const card = this.card;
+    const genToken = ++this.genToken;
     this.abortCtrl = new AbortController();
     this.ui.setStatus('thinking');
     try {
       // 工具暴露：电脑权限开 → 全部；仅联网开关开 → 仅 web 工具；都关 → 无工具
       const defs = this.toolsOn ? TOOL_DEFS : this.webSearchOn ? WEB_ONLY_TOOL_DEFS : [];
-      await this.toolLoop(card, defs);
+      await this.toolLoop(card, defs, genToken);
+      if (genToken !== this.genToken) return;
       this.ui.finalizeStreaming();
       this.ui.setTokens(this.tokensLabel());
       this.ui.setStatus('idle');
       await this.saveSession();
     } catch (e) {
+      if (genToken !== this.genToken) return;
       const aborted = this.abortCtrl.signal.aborted;
       if (aborted) {
         this.ui.failStreaming('（已中断）');
@@ -735,13 +740,13 @@ export class CfDriver {
         this.ui.setStatus('error', msg);
       }
     } finally {
-      this.abortCtrl = null;
+      if (genToken === this.genToken) this.abortCtrl = null;
     }
   }
 
   /** 工具循环（本地实现，不依赖 node 环境）。toolDefs 决定暴露哪些工具：
    *  默认全部（电脑权限开）；传 WEB_ONLY_TOOL_DEFS 则仅联网工具 */
-  private async toolLoop(card: CharacterCard, toolDefs: ToolDef[] = TOOL_DEFS): Promise<void> {
+  private async toolLoop(card: CharacterCard, toolDefs: ToolDef[] = TOOL_DEFS, genToken: number): Promise<void> {
     const systemMsg: ChatMessage = {
       role: 'system',
       content: buildRpSystem(card, this.rpUser) + '\n\n' + buildToolSection(toolDefs.map((t) => t.function.name), this.sshCfg() ? `SSH 远程服务器 ${this.sshLabel()}` : '（未配置 SSH 服务器）'),
@@ -760,6 +765,7 @@ export class CfDriver {
           tools: toolDefs,
           signal: this.abortCtrl!.signal,
           onEvent: (ev) => {
+            if (genToken !== this.genToken) return;
             if (ev.reasoningDelta) {
               if (!streaming) {
                 this.ui.beginStreaming(this.assistantName);
@@ -769,6 +775,7 @@ export class CfDriver {
               this.ui.appendReasoning?.(ev.reasoningDelta);
             }
             if (ev.delta) {
+              if (genToken !== this.genToken) return;
               if (!streaming) {
                 this.ui.setStatus('streaming');
                 this.ui.beginStreaming(this.assistantName);
@@ -781,11 +788,13 @@ export class CfDriver {
         },
         reqMessages,
       );
+      if (genToken !== this.genToken) return;
       this.session!.usage.promptTokens += result.usage.promptTokens;
       this.session!.usage.completionTokens += result.usage.completionTokens;
       messages.push(result.message);
       if (!result.message.tool_calls?.length) break;
       for (const call of result.message.tool_calls) {
+        if (genToken !== this.genToken) return;
         if (streaming) {
           if (!streamingContent && !streamingReasoning) this.ui.removeLastMessage();
           else this.ui.finalizeStreaming();
@@ -805,6 +814,7 @@ export class CfDriver {
         this.ui.setStatus('tool', label);
         this.ui.pushMessage({ role: 'tool', toolLabel: `${name}${label ? ': ' + label : ''}`, content: '运行中…' });
         const check = await this.checkPermission(name, detail);
+        if (genToken !== this.genToken) return;
         let output: string;
         try {
           output = check.allowed
@@ -813,10 +823,12 @@ export class CfDriver {
         } catch (e) {
           output = `工具执行出错: ${e instanceof Error ? e.message : String(e)}`;
         }
+        if (genToken !== this.genToken) return;
         this.ui.replaceLastMessage({ role: 'tool', toolLabel: output.split('\n')[0]?.slice(0, 60) ?? '', content: output });
         messages.push({ role: 'tool', content: output, tool_call_id: call.id });
       }
     }
+    if (genToken !== this.genToken) return;
     this.session!.messages = messages;
   }
 
@@ -828,6 +840,9 @@ export class CfDriver {
   /* ---------- 会话管理 ---------- */
 
   async loadSession(id: string): Promise<void> {
+    // 切换会话前立即作废正在进行的生成，防止旧角色的流式输出/工具结果写进新会话
+    this.genToken++;
+    this.abort();
     const row = await this.stores.loadSession(id);
     if (!row) {
       this.ui.pushSystem(this.lang === 'en' ? 'Failed to load session' : '会话加载失败');
@@ -1768,6 +1783,9 @@ export class CfDriver {
   }
 
   private async newChat(): Promise<void> {
+    // 新建会话同样作废当前生成，避免旧回复串进新会话
+    this.genToken++;
+    this.abort();
     if (this.session) await this.saveSession();
     if (!this.card) {
       this.ui.pushSystem('还没有角色卡，用 /character 选择。');
