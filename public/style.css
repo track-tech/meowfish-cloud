@@ -1759,6 +1759,8 @@ html, body {
 }
 .term-ctl {
   position: relative;
+  display: inline-grid;
+  place-items: center;
   width: 13px;
   height: 13px;
   border-radius: 50%;
@@ -1767,32 +1769,27 @@ html, body {
   flex: none;
   transition: filter 0.15s ease, transform 0.15s ease;
 }
+.term-ctl svg {
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.62);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.term-window-controls:hover .term-ctl svg { opacity: 1; }
 .term-ctl::after {
   content: "";
   position: absolute;
   inset: -5px;
   border-radius: 50%;
 }
-.term-ctl::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: 9px;
-  font-weight: 800;
-  line-height: 1;
-  color: rgba(0, 0, 0, 0.55);
-  opacity: 0;
-}
-.term-window-controls:hover .term-ctl::before { opacity: 1; }
 .term-ctl:hover { filter: brightness(1.1); transform: scale(1.06); }
 .term-close { background: #ff5f57; }
-.term-close::before { content: "×"; }
 .term-minimize { background: #febc2e; }
-.term-minimize::before { content: "−"; }
 .term-zoom { background: #28c840; }
-.term-zoom::before { content: "+"; }
 #ssh-term-view .ssh-term-title {
   position: absolute;
   left: 0;
@@ -1832,6 +1829,21 @@ html, body {
   transition: background 0.15s ease, color 0.15s ease;
 }
 .term-ico:hover { background: rgba(255, 255, 255, 0.08); color: #e6edf3; }
+.term-ico svg,
+.term-tab-new svg,
+#ssh-term-findbar button svg,
+#ssh-term-minibutton svg,
+#btn-export-sessions svg,
+#btn-import-sessions svg,
+#btn-manage-cancel svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.term-ico svg { width: 16px; height: 16px; }
+.term-tab-new svg { width: 16px; height: 16px; }
 .ssh-term-tabbar {
   flex: none;
   display: flex;
@@ -1881,6 +1893,7 @@ html, body {
   opacity: 0;
   transition: opacity 0.15s ease, color 0.15s ease;
 }
+.ssh-term-tab .tab-close svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
 .ssh-term-tab:hover .tab-close,
 .ssh-term-tab.active .tab-close { opacity: 0.85; }
 .ssh-term-tab .tab-close:hover { color: #ff5f57; }
@@ -1949,6 +1962,9 @@ html, body {
 }
 #ssh-term-findbar input:focus { border-color: #58a6ff; }
 #ssh-term-findbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: #21262d;
   color: #c9d1d9;
   border: 1px solid #30363d;
@@ -1956,8 +1972,9 @@ html, body {
   padding: 5px 10px;
   cursor: pointer;
 }
+#ssh-term-findbar button svg { width: 13px; height: 13px; }
 #ssh-term-findbar button:hover { border-color: #58a6ff; }
-#ssh-term-find-close { width: 30px; padding: 5px 0; font-weight: 700; }
+#ssh-term-find-close { width: 32px; justify-content: center; padding: 5px 0; font-weight: 700; }
 #ssh-term-output mark {
   background: rgba(250, 204, 21, 0.35);
   color: #fff;
@@ -2019,7 +2036,18 @@ html.light #ssh-term-findbar button { background: #f6f8fa; color: #1f2328; borde
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   transition: transform 0.15s ease, background 0.15s ease;
 }
+#ssh-term-minibutton svg { width: 20px; height: 20px; }
 #ssh-term-minibutton:hover { transform: translateY(-2px); background: rgba(22, 27, 34, 0.98); }
+#btn-export-sessions,
+#btn-import-sessions,
+#btn-manage-cancel {
+  display: inline-grid;
+  place-items: center;
+  padding: 5px 9px;
+}
+#btn-export-sessions svg,
+#btn-import-sessions svg,
+#btn-manage-cancel svg { width: 15px; height: 15px; }
 /* ANSI SGR 颜色 */
 .c30 { color: #111827; } .c31 { color: #f87171; } .c32 { color: #4ade80; } .c33 { color: #facc15; }
 .c34 { color: #60a5fa; } .c35 { color: #c084fc; } .c36 { color: #22d3ee; } .c37 { color: #e5e7eb; }

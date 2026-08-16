@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=45">
+  <link rel="stylesheet" href="/style.css?v=46">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -23,9 +23,9 @@
     <div id="manage-bar" class="hidden">
       <label class="manage-all" title="全选"><input type="checkbox" id="manage-select-all"></label>
       <span class="spacer"></span>
-      <button id="btn-export-sessions" title="导出所选会话 JSON">⇩</button>
-      <button id="btn-import-sessions" title="从 JSON 导入会话">⇧</button>
-      <button id="btn-manage-cancel" title="退出管理" data-i18n="cancel">✕</button>
+      <button id="btn-export-sessions" title="导出所选会话 JSON"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></button>
+      <button id="btn-import-sessions" title="从 JSON 导入会话"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg></button>
+      <button id="btn-manage-cancel" title="退出管理"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
       <button id="btn-manage-delete" data-i18n="delete-selected">删除所选</button>
       <input id="sessions-import-file" type="file" accept="application/json" class="hidden">
     </div>
@@ -132,28 +132,28 @@
   <div id="ssh-term-view" class="hidden">
     <div id="ssh-term-top" class="ssh-term-top">
       <div class="term-window-controls">
-        <button id="ssh-term-exit" class="term-ctl term-close" type="button" title="关闭" aria-label="关闭"></button>
-        <button id="ssh-term-min" class="term-ctl term-minimize" type="button" title="最小化" aria-label="最小化"></button>
-        <button id="ssh-term-max" class="term-ctl term-zoom" type="button" title="最大化/还原" aria-label="最大化/还原"></button>
+        <button id="ssh-term-exit" class="term-ctl term-close" type="button" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+        <button id="ssh-term-min" class="term-ctl term-minimize" type="button" title="最小化" aria-label="最小化"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
+        <button id="ssh-term-max" class="term-ctl term-zoom" type="button" title="最大化/还原" aria-label="最大化/还原"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
       </div>
       <span class="ssh-term-title">SSH 终端</span>
       <div class="term-top-actions">
-        <button id="ssh-term-send" class="term-ico" type="button" title="把最近终端输出发给喵鱼">⇧</button>
-        <button id="ssh-term-find" class="term-ico" type="button" title="在当前标签输出中搜索">⌕</button>
-        <button id="ssh-term-reconnect" class="term-ico" type="button" title="重新连接当前标签">⟳</button>
-        <button id="ssh-term-clear" class="term-ico" type="button" title="清屏（Ctrl+L）">⌫</button>
-        <button id="ssh-term-reconfig" class="term-ico" type="button" title="连接设置">⚙</button>
+        <button id="ssh-term-send" class="term-ico" type="button" title="把最近终端输出发给喵鱼"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>
+        <button id="ssh-term-find" class="term-ico" type="button" title="在当前标签输出中搜索"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
+        <button id="ssh-term-reconnect" class="term-ico" type="button" title="重新连接当前标签"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
+        <button id="ssh-term-clear" class="term-ico" type="button" title="清屏（Ctrl+L）"><svg viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z"></path><line x1="18" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="18" y2="15"></line></svg></button>
+        <button id="ssh-term-reconfig" class="term-ico" type="button" title="连接设置"><svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg></button>
       </div>
     </div>
     <div class="ssh-term-tabbar">
       <div id="ssh-term-tabs" class="ssh-term-tabs"></div>
-      <button id="ssh-term-new" class="term-tab-new" type="button" title="新建连接">＋</button>
+      <button id="ssh-term-new" class="term-tab-new" type="button" title="新建连接"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
     </div>
     <div id="ssh-term-findbar" class="hidden">
       <input id="ssh-term-find-input" type="text" placeholder="在当前标签输出中搜索…">
-      <button id="ssh-term-find-prev" type="button">↑ 上一个</button>
-      <button id="ssh-term-find-next" type="button">↓ 下一个</button>
-      <button id="ssh-term-find-close" type="button">×</button>
+      <button id="ssh-term-find-prev" type="button"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg><span>上一个</span></button>
+      <button id="ssh-term-find-next" type="button"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="5 12 12 19 19 12"></polyline></svg><span>下一个</span></button>
+      <button id="ssh-term-find-close" type="button"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
     </div>
     <div id="ssh-term-screen">
       <pre id="ssh-term-output" tabindex="-1"></pre>
@@ -167,8 +167,8 @@
     <textarea id="ssh-term-input" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
   </div>
 
-  <button id="ssh-term-minibutton" class="hidden" type="button" title="恢复 SSH 终端">🖥️</button>
+  <button id="ssh-term-minibutton" class="hidden" type="button" title="恢复 SSH 终端"><svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></button>
 
-  <script src="/app.js?v=45"></script>
+  <script src="/app.js?v=46"></script>
 </body>
 </html>

@@ -1595,7 +1595,7 @@
     el.innerHTML = termTabs.map(function (t, i) {
       return '<button type="button" class="ssh-term-tab' + (i === termActiveIdx ? ' active' : '') + '" data-i="' + i + '">' +
         '<span class="tab-label">' + esc(t.title) + '</span>' +
-        '<span class="tab-close" data-close="' + i + '" title="关闭">×</span></button>';
+        '<span class="tab-close" data-close="' + i + '" title="关闭"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></span></button>';
     }).join('');
     el.querySelectorAll('.ssh-term-tab').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
