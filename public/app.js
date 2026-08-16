@@ -1170,6 +1170,7 @@
   var termPendingInput = '';
   var TERM_GEOM_KEY = 'meowfish-sshterm-geom';
   var termMax = false;
+  var termMinimized = false;
 
   function activeTerm() { return termTabs[termActiveIdx] || null; }
 
@@ -1698,9 +1699,33 @@
     v.classList.toggle('max', termMax);
     if (!termMax) applyTermGeom();
   }
+  /** 最小化：窗口隐藏但所有 SSH 连接保持，右下角留一个悬浮按钮恢复 */
+  function minimizeTermWindow() {
+    if (!termActive) return;
+    saveTermGeom();
+    termActive = false;
+    termMinimized = true;
+    $('ssh-term-view').classList.add('hidden');
+    document.body.classList.remove('term-active');
+    $('ssh-term-minibutton').classList.remove('hidden');
+  }
+  function restoreTermWindow() {
+    termMinimized = false;
+    termActive = true;
+    $('ssh-term-minibutton').classList.add('hidden');
+    $('ssh-term-view').classList.remove('hidden');
+    document.body.classList.add('term-active');
+    applyTermGeom();
+    renderTermTabs();
+    renderTermStatus();
+    if (activeTerm()) renderTermBuffer(activeTerm());
+    termInputEl().focus();
+  }
 
   function showTermView() {
     termActive = true;
+    termMinimized = false;
+    $('ssh-term-minibutton').classList.add('hidden');
     $('ssh-term-view').classList.remove('hidden');
     document.body.classList.add('term-active');
     applyTermGeom();
@@ -1713,6 +1738,8 @@
   function exitSshTerminal() {
     saveTermGeom();
     termActive = false;
+    termMinimized = false;
+    $('ssh-term-minibutton').classList.add('hidden');
     termTabs.forEach(function (t) { closeTabWs(t); });
     termTabs = [];
     termActiveIdx = -1;
@@ -1863,6 +1890,7 @@
   }
 
   function openSshTerminal() {
+    if (termMinimized) { restoreTermWindow(); return; }
     if (termActive) { termInputEl().focus(); return; }
     // 机器人 /ssh 配置优先：终端与工具始终共用同一份凭据
     var cfg = loadAppSshConfig() || loadSshTermConfig();
@@ -2626,6 +2654,8 @@
   // ---- Web SSH 终端事件 ----
   $('btn-sshterm').addEventListener('click', openSshTerminal);
   $('ssh-term-exit').addEventListener('click', exitSshTerminal);
+  $('ssh-term-min').addEventListener('click', minimizeTermWindow);
+  $('ssh-term-minibutton').addEventListener('click', restoreTermWindow);
   $('ssh-term-reconfig').addEventListener('click', function () { openSshTermForm(false); });
   $('ssh-term-new').addEventListener('click', function () { openSshTermForm(true); });
   $('ssh-term-max').addEventListener('click', toggleTermMax);

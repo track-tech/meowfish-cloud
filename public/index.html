@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=41">
+  <link rel="stylesheet" href="/style.css?v=42">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -128,21 +128,26 @@
     </div>
   </div>
 
-  <!-- Web SSH 交互式终端（全屏覆盖层，body 顶层保证盖住侧边栏） -->
+  <!-- Web SSH 交互式终端（桌面风格浮动窗口） -->
   <div id="ssh-term-view" class="hidden">
     <div id="ssh-term-top" class="ssh-term-top">
-      <span class="ssh-term-title">🖥️ SSH 终端</span>
+      <div class="term-window-controls">
+        <button id="ssh-term-exit" class="term-ctl term-close" type="button" title="关闭" aria-label="关闭"></button>
+        <button id="ssh-term-min" class="term-ctl term-minimize" type="button" title="最小化" aria-label="最小化"></button>
+        <button id="ssh-term-max" class="term-ctl term-zoom" type="button" title="最大化/还原" aria-label="最大化/还原"></button>
+      </div>
+      <span class="ssh-term-title">SSH 终端</span>
+      <div class="term-top-actions">
+        <button id="ssh-term-send" class="term-ico" type="button" title="把最近终端输出发给喵鱼">🐟</button>
+        <button id="ssh-term-find" class="term-ico" type="button" title="在当前标签输出中搜索">🔍</button>
+        <button id="ssh-term-reconnect" class="term-ico" type="button" title="重新连接当前标签">⟳</button>
+        <button id="ssh-term-clear" class="term-ico" type="button" title="清屏（Ctrl+L）">⌧</button>
+        <button id="ssh-term-reconfig" class="term-ico" type="button" title="连接设置">⚙</button>
+      </div>
+    </div>
+    <div class="ssh-term-tabbar">
       <div id="ssh-term-tabs" class="ssh-term-tabs"></div>
-      <button id="ssh-term-new" class="pill" type="button" title="新建连接">＋</button>
-      <span id="ssh-term-status" class="ssh-term-status">未连接</span>
-      <span class="spacer"></span>
-      <button id="ssh-term-send" class="pill" type="button" title="把最近终端输出发给喵鱼">发给喵鱼</button>
-      <button id="ssh-term-find" class="pill" type="button">查找</button>
-      <button id="ssh-term-reconnect" class="pill" type="button">重连</button>
-      <button id="ssh-term-clear" class="pill" type="button" title="清屏">清屏</button>
-      <button id="ssh-term-reconfig" class="pill" type="button">连接设置</button>
-      <button id="ssh-term-max" class="pill" type="button" title="最大化/还原">▢</button>
-      <button id="ssh-term-exit" class="pill" type="button">退出</button>
+      <button id="ssh-term-new" class="term-tab-new" type="button" title="新建连接">＋</button>
     </div>
     <div id="ssh-term-findbar" class="hidden">
       <input id="ssh-term-find-input" type="text" placeholder="在当前标签输出中搜索…">
@@ -153,10 +158,17 @@
     <div id="ssh-term-screen">
       <pre id="ssh-term-output" tabindex="-1"></pre>
     </div>
+    <div class="ssh-term-statusbar">
+      <span id="ssh-term-status" class="ssh-term-status">未连接</span>
+      <span class="spacer"></span>
+      <span class="term-hint">Ctrl+1~9 切换标签 · 拖动标题栏移动 · 双击标题栏最大化</span>
+    </div>
     <div id="ssh-term-resize" title="拖动调整大小"></div>
     <textarea id="ssh-term-input" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
   </div>
 
-  <script src="/app.js?v=41"></script>
+  <button id="ssh-term-minibutton" class="hidden" type="button" title="恢复 SSH 终端">🖥️</button>
+
+  <script src="/app.js?v=42"></script>
 </body>
 </html>
