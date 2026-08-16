@@ -2,7 +2,7 @@ import { chat, LlmError } from './llm/client.js';
 import type { ChatMessage, ModelProfile, ToolDef } from './llm/types.js';
 import { MODEL_PRESETS, presetKeyOf, type AppConfig } from './llm/profiles-core.js';
 import { emptyCard, parseCardJson, type CharacterCard } from './rp/card-core.js';
-import { buildRpSystem, buildToolSection, buildVoiceSection, type RpUser } from './rp/prompt.js';
+import { buildRpSystem, buildToolSection, type RpUser } from './rp/prompt.js';
 import { webSearch, type SearchResult } from './core/web.js';
 import { buildGrepCmd, buildListCmd, buildReadCmd, buildWriteCmd } from './core/ssh-cmds.js';
 import { globToRegExp } from './core/glob.js';
@@ -223,17 +223,6 @@ export class CfDriver {
   cards: { name: string; data: CharacterCard }[] = [];
   private abortCtrl: AbortController | null = null;
   private yolo = false;
-  /** 实时语音对话模式（免提语音：注入语音规则，回复走 TTS 朗读） */
-  private voiceChat = false;
-
-  /** 开启/关闭语音对话模式（前端进入/退出语音视图时调用；状态随配置持久化到浏览器，DO 回收不丢） */
-  setVoiceChat(on: boolean): void {
-    if (this.voiceChat === on) return;
-    this.voiceChat = on;
-    this.config.general.voiceChat = on;
-    this.emitConfig();
-    this.ui.pushSystem(on ? '语音对话模式已开启 —— 回复将口语化并带语音标记' : '语音对话模式已关闭');
-  }
 
   constructor(
     private ui: WebUi,
@@ -257,7 +246,6 @@ export class CfDriver {
     }
     // 从浏览器配置恢复跨请求开关（零持久化红线：不能只存 DO 内存）
     this.yolo = this.config.general.yolo === true;
-    this.voiceChat = this.config.general.voiceChat === true;
     this.ui.setModeLabel(this.toolsOn ? 'AGENT' : 'RP');
     this.ui.setToolsBadge?.(this.toolsOn);
     this.ui.setWebSearchBadge?.(this.webSearchOn);
@@ -305,9 +293,8 @@ export class CfDriver {
       this.card = cardHit.data;
       this.ui.pushSystem(`角色: ${this.card.data.name}`);
     }
-    // 恢复浏览器配置中的跨请求开关（yolo / 语音模式）
+    // 恢复浏览器配置中的跨请求开关（yolo）
     this.yolo = this.config.general.yolo === true;
-    this.voiceChat = this.config.general.voiceChat === true;
     this.ui.setYoloBadge(this.yolo);
     this.ui.setModelLabel(this.modelLabel);
     this.ui.setModeLabel(this.toolsOn ? 'AGENT' : 'RP');
@@ -633,13 +620,7 @@ export class CfDriver {
 
   /* ---------- 主流程 ---------- */
 
-  async send(text: string, voice = false): Promise<void> {
-    // 消息级语音标记：语音识别发送时带上（DO 会被回收，不能只依赖 /voice 命令的易失状态）
-    if (voice && !this.voiceChat) {
-      this.voiceChat = true;
-      this.config.general.voiceChat = true;
-      this.emitConfig();
-    }
+  async send(text: string): Promise<void> {
     if (this.busy || !this.session) return;
     if (this.toolsOn && text.startsWith('!')) {
       await this.directBash(text.slice(1).trim());
@@ -735,7 +716,7 @@ export class CfDriver {
   private async toolLoop(card: CharacterCard, toolDefs: ToolDef[] = TOOL_DEFS): Promise<void> {
     const systemMsg: ChatMessage = {
       role: 'system',
-      content: buildRpSystem(card, this.rpUser) + '\n\n' + buildToolSection(toolDefs.map((t) => t.function.name), this.sshCfg() ? `SSH 远程服务器 ${this.sshLabel()}` : '（未配置 SSH 服务器）') + (this.voiceChat ? '\n\n' + buildVoiceSection() : ''),
+      content: buildRpSystem(card, this.rpUser) + '\n\n' + buildToolSection(toolDefs.map((t) => t.function.name), this.sshCfg() ? `SSH 远程服务器 ${this.sshLabel()}` : '（未配置 SSH 服务器）'),
     };
     const messages: ChatMessage[] = [...this.session!.messages];
     let streaming = false;
@@ -743,8 +724,7 @@ export class CfDriver {
     let streamingReasoning = false;
     for (let iter = 0; iter < 25; iter++) {
       const reqMessages: ChatMessage[] = [systemMsg, ...messages];
-      // 语音对话模式：关闭思考（reasoner 首字太慢，语音场景禁用）
-      const genProfile = this.voiceChat ? { ...this.profile!, thinking: false } : this.profile!;
+      const genProfile = this.profile!;
       const result = await chat(
         {
           profile: genProfile,
@@ -905,9 +885,6 @@ export class CfDriver {
         return;
       case 'websearch':
         this.toggleWebSearch();
-        return;
-      case 'voice':
-        this.setVoiceChat(args[0] !== 'off');
         return;
       case 'ssh':
         this.openSshForm();

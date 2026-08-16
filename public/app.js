@@ -20,13 +20,9 @@
       'confirm-del-session': '确定删除这个会话吗？',
       'confirm-del-sessions': '确定删除选中的 {n} 个会话吗？此操作不可恢复。',
       'confirm-title': '确认操作',
-      'voice': '语音对话', 'voice-mode-title': '免提语音对话', 'voice-exit': '退出',
-      'voice-listening': '聆听中…直接说话', 'voice-recording': '听到你了，请继续说…',
-      'voice-working': '识别中…', 'voice-thinking': '思考中…', 'voice-speaking': '朗读中…说话可打断',
-      'voice-hint': '直接说话即可 · 说完停顿会自动发送 · 朗读时开口可打断',
       'mic-hold': '按住说话（松开识别）', 'mic-listening': '正在聆听…松开结束',
       'mic-working': '正在识别…', 'mic-no-key': '未配置 MiMo API Key：点「设置 → 实时语音（MiMo）」填写',
-      'mic-fail': '识别失败：', 'voice-fail': '朗读失败：', 'voice-play': '朗读',
+      'mic-fail': '识别失败：',
       'daynight': '白日 / 暗夜切换（浅滩 ↔ 深海）',
       'time-now': '刚刚', 'time-min': ' 分钟前', 'time-hour': ' 小时前', 'time-yesterday': '昨天', 'time-day': '{m}月{d}日',
       'tooltips': {
@@ -50,13 +46,9 @@
       'confirm-del-session': 'Delete this session?',
       'confirm-del-sessions': 'Delete {n} selected sessions? This cannot be undone.',
       'confirm-title': 'Confirm',
-      'voice': 'Voice chat', 'voice-mode-title': 'Hands-free Voice Chat', 'voice-exit': 'Exit',
-      'voice-listening': 'Listening… just talk', 'voice-recording': 'Got it, keep talking…',
-      'voice-working': 'Transcribing…', 'voice-thinking': 'Thinking…', 'voice-speaking': 'Speaking… talk to interrupt',
-      'voice-hint': 'Just talk · pause to send · interrupt anytime',
       'mic-hold': 'Hold to talk (release to transcribe)', 'mic-listening': 'Listening… release to finish',
       'mic-working': 'Transcribing…', 'mic-no-key': 'MiMo API Key not set: Settings → Voice (MiMo)',
-      'mic-fail': 'Recognition failed: ', 'voice-fail': 'Read-aloud failed: ', 'voice-play': 'Read',
+      'mic-fail': 'Recognition failed: ',
       'daynight': 'Day / Night toggle (Shoal ↔ Deep Sea)',
       'time-now': 'just now', 'time-min': 'm ago', 'time-hour': 'h ago', 'time-yesterday': 'Yesterday', 'time-day': '{m}/{d}',
       'tooltips': {
@@ -1097,45 +1089,15 @@
           break;
         case 'streamStart':
           appendMsg({ role: m.role || 'assistant', name: m.name, content: '', streaming: true });
-          // 语音对话模式：新回复开始 → 重置句子流（解析新回复的音色标记）
-          if (voiceActive && voiceState === 'thinking') resetSentenceStream();
           break;
         case 'delta':
           appendDelta(m.text);
-          // 语音对话模式：句子级流式朗读（生成一句、合成一句，不等整段）
-          if (voiceActive && voiceState === 'thinking') feedSentenceStream(m.text);
           break;
         case 'reasonDelta':
           appendReasonDelta(m.text);
           break;
         case 'streamEnd':
           endStream();
-          // 语音对话模式：回复完成 → 冲刷残余文本，全部朗读完毕回聆听
-          if (voiceActive && voiceState === 'thinking') {
-            if (vc && vc.suppressSpeak) {
-              // 用户在等待回复时插话：旧回复不再朗读，等新回复
-              vc.suppressSpeak = false;
-              stopSpeak();
-              sentenceQueue.length = 0;
-              pendingText = '';
-              setVoiceStatus(t('voice-listening'), 'listening');
-              break;
-            }
-            var msgs = messagesEl.querySelectorAll('.msg.assistant .bubble');
-            if (msgs.length) {
-              var lastMsg = msgs[msgs.length - 1];
-              var raw = lastMsg.getAttribute('data-raw') || lastMsg.textContent || '';
-              // 剥离 {{voice: 音色|风格}} 标记（保留换行与 Markdown 结构，气泡重新渲染而不是覆写为纯文本）
-              var clean = raw.replace(/\{\{\s*voice\b[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
-              lastAssistantText = clean;
-              $('vv-bot-line').textContent = clean;
-              var cleanRaw = raw.replace(/\{\{\s*voice\b[^}]*\}\}/g, '').trim();
-              lastMsg.innerHTML = mdToHtml(esc(cleanRaw));
-              lastMsg.removeAttribute('data-raw');
-            }
-            // 把流式切句未覆盖的残余文本也入队合成
-            flushSentenceStream();
-          }
           break;
         case 'streamFail':
           failStream(m.text);
@@ -1923,21 +1885,9 @@
     addTermTab(cfg);
   }
 
-  /* ---------- 免提连续语音对话（OpenAI Realtime 式体验 · DeepSeek + MiMo） ---------- */
+  /* ---------- 语音：按住说话（回合制） ---------- */
 
-  var speechKey = '';                     // MiMo key：请求头带上（本地服务端 secrets 兜底）
-  var audioCtx = null;                    // 播放用 AudioContext（进入语音模式时创建）
-  var vcMicCtx = null;                    // 16kHz 采集 AudioContext（必须在用户手势内创建，否则 suspended → VAD 永远静音）
-  var voiceActive = false;                // 语音对话模式是否激活
-  var voiceState = 'off';                 // off | listening | recording | transcribing | thinking | speaking
-  var micRms = 0;                         // 麦克风实时音量（0~1，动效用）
-  var playRms = 0;                        // 播放实时音量（0~1，动效用）
-  var vc = null;                          // 语音对话运行时句柄 { micCtx, proc, micStream, recChunks, segStart, vadTh, ... }
-  var speakQueue = [];                    // 待播放 AudioBuffer 队列
-  var speakSource = null;                 // 当前播放源
-  var playAnalyser = null;                // 播放音量分析（动效用）
-  var lastAssistantText = '';             // 最近一次朗读/应朗读的助手文本
-  var lastVoiceText = '';                 // 最近一次识别文本（字幕回显）
+  var speechKey = '';
 
   try {
     var _lc = loadLocalConfig();
@@ -1950,515 +1900,10 @@
     return h;
   }
 
-  function setVoiceStatus(text, state) {
-    voiceState = state;
-    $('voice-status').textContent = text;
-    $('voice-status').className = 'vv-status vs-' + state;
-  }
-
-  /* ---- 进入 / 退出语音对话模式 ---- */
-  function enterVoiceMode() {
-    if (voiceActive) return;
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      pushToast(t('mic-fail') + 'getUserMedia unavailable');
-      return;
-    }
-    // 用户手势内同步创建两个 AudioContext（绕过自动播放策略：异步回调里创建会 suspended，VAD 全零 → 卡聆听）
-    try {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        playAnalyser = audioCtx.createAnalyser();
-        playAnalyser.fftSize = 256;
-        playAnalyser.connect(audioCtx.destination);
-      }
-      if (audioCtx.state === 'suspended') void audioCtx.resume();
-      if (!vcMicCtx || vcMicCtx.state === 'closed') vcMicCtx = new AudioContext({ sampleRate: 16000 });
-      if (vcMicCtx.state === 'suspended') void vcMicCtx.resume();
-    } catch (e) {
-      pushToast(t('voice-fail') + (e instanceof Error ? e.message : ''));
-      return;
-    }
-    voiceActive = true;
-    document.body.classList.add('voice-active');
-    $('btn-voice').classList.add('on');
-    $('voice-view').classList.remove('hidden');
-    $('vv-hint').textContent = t('voice-hint');
-    // 通知服务端进入语音对话模式：注入语音规则（口语化 + 输出 {{voice}} 标记）
-    post('/ui/command', { line: '/voice' });
-    lastVoiceText = '';
-    lastAssistantText = '';
-    $('vv-user-line').textContent = '';
-    $('vv-bot-line').textContent = '';
-    setVoiceStatus(t('voice-listening'), 'listening');
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(function (s) {
-        if (!voiceActive) {
-          s.getTracks().forEach(function (t) { t.stop(); });
-          return;
-        }
-        // 16kHz 单声道采集（ScriptProcessor 收集 PCM；VAD 与动效直接从 chunks 算音量）
-        var src = vcMicCtx.createMediaStreamSource(s);
-        var proc = vcMicCtx.createScriptProcessor(2048, 1, 1);
-        var mute = vcMicCtx.createGain();
-        mute.gain.value = 0; // 采集不播放（防回授）
-        vc = {
-          micCtx: vcMicCtx, proc, micStream: s,
-          recChunks: [], segStart: 0, vadSpeech: 0, vadSilence: 0,
-          vadTh: 0.008, noiseSamples: 0, noiseSum: 0, segLen: 0, busy: false, suppressSpeak: false,
-        };
-        src.connect(proc);
-        proc.connect(mute);
-        mute.connect(vcMicCtx.destination);
-        proc.onaudioprocess = function (e) {
-          if (!voiceActive) return;
-          vc.recChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-          vc.segLen += e.inputBuffer.getChannelData(0).length;
-        };
-        startVadLoop();
-      })
-      .catch(function (e) {
-        voiceActive = false;
-        document.body.classList.remove('voice-active');
-        $('voice-view').classList.add('hidden');
-        $('btn-voice').classList.remove('on');
-        pushToast(t('mic-fail') + (e instanceof Error ? e.message : String(e)));
-      });
-  }
-
-  function exitVoiceMode() {
-    voiceActive = false;
-    stopSpeak();
-    stopVadLoop();
-    sentenceQueue.length = 0;
-    pendingText = '';
-    // 通知服务端退出语音对话模式
-    post('/ui/command', { line: '/voice off' });
-    if (vc) {
-      try { vc.proc.disconnect(); } catch (e) { /* ignore */ }
-      try { vc.micStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
-      vc = null;
-    }
-    if (vcMicCtx) {
-      try { vcMicCtx.close(); } catch (e) { /* ignore */ }
-      vcMicCtx = null;
-    }
-    document.body.classList.remove('voice-active');
-    $('voice-view').classList.add('hidden');
-    $('btn-voice').classList.remove('on');
-    setVoiceStatus('', 'off');
-  }
-
-  /* ---- VAD 循环：每 100ms 算音量，驱动状态机 + 动效 ---- */
-  var vadTimer = null;
-  var rafTimer = null;
-
-  function startVadLoop() {
-    stopVadLoop();
-    vadTimer = setInterval(vadTick, 100);
-    rafTimer = requestAnimationFrame(drawVoiceAnim);
-  }
-  function stopVadLoop() {
-    if (vadTimer) { clearInterval(vadTimer); vadTimer = null; }
-    if (rafTimer) { cancelAnimationFrame(rafTimer); rafTimer = null; }
-  }
-
-  function vadTick() {
-    if (!voiceActive || !vc) return;
-    // 空闲/朗读/思考阶段只保留最近 8s（80 块）用于 VAD 回看与噪底估计：
-    // 防止长期挂机时 recChunks 无界增长（recording 阶段有 15s 上限与断句裁剪，不在此修剪）
-    if (voiceState !== 'recording' && vc.recChunks.length > 80) {
-      var dropCount = vc.recChunks.length - 80;
-      vc.recChunks.splice(0, dropCount);
-      vc.segStart = Math.max(0, vc.segStart - dropCount);
-    }
-    // 直接从最近采集的 PCM 算音量：RMS（动效）+ peak（VAD，更灵敏）
-    var chunks = vc.recChunks;
-    var tailSamples = 1600; // 最近 0.1s（16kHz）
-    var sum = 0, n = 0, peak = 0;
-    for (var ci = chunks.length - 1; ci >= 0 && n < tailSamples; ci--) {
-      var c = chunks[ci];
-      for (var si = c.length - 1; si >= 0 && n < tailSamples; si--) {
-        var v = c[si];
-        sum += v * v;
-        var av = v < 0 ? -v : v;
-        if (av > peak) peak = av;
-        n++;
-      }
-    }
-    micRms = n ? Math.sqrt(sum / n) : 0;
-    // 软增益：普通麦克风音量偏小，放大后 VAD 与动效都更跟手
-    var gain = 2.2;
-    micRms = Math.min(1, micRms * gain);
-    var effPeak = Math.min(1, peak * gain);
-    // 读播放音量（动效：朗读时圆环跟随声音）
-    if (playAnalyser) {
-      var pdata = new Float32Array(playAnalyser.fftSize);
-      playAnalyser.getFloatTimeDomainData(pdata);
-      var psum = 0;
-      for (var j = 0; j < pdata.length; j++) psum += pdata[j] * pdata[j];
-      playRms = Math.sqrt(psum / pdata.length) * 1.6; // 播放源音量较小，放大一点
-      if (playRms > 1) playRms = 1;
-    }
-    // 自适应底噪：前 0.8s 采集，阈值 = max(0.008, 底噪*2.5)
-    if (vc.noiseSamples < 8) {
-      vc.noiseSum += micRms;
-      vc.noiseSamples++;
-      if (vc.noiseSamples >= 8) {
-        var noise = vc.noiseSum / 8;
-        vc.vadTh = Math.max(0.008, noise * 2.5);
-      }
-      return;
-    }
-    var th = vc.vadTh;
-    // 语音判定：peak 超阈值即算有声（比纯 RMS 灵敏，远麦轻声也能触发）
-    // speaking 时用更严阈值：麦克风音量需明显盖过扬声器（防外放回声自我打断）
-    var speakTh = voiceState === 'speaking' ? Math.max(th, playRms * 1.8, 0.03) : th;
-    var voiced = effPeak > speakTh || micRms > speakTh * 0.7;
-    if (voiced) { vc.vadSpeech++; vc.vadSilence = 0; }
-    else { vc.vadSilence++; vc.vadSpeech = 0; }
-
-    switch (voiceState) {
-      case 'listening':
-        // 连续 0.2s 有声 → 开始记录句子
-        if (vc.vadSpeech >= 2) {
-          vc.vadSpeech = 0;
-          vc.vadSilence = 0;
-          // 回退 4 个采集块（约 0.5s）：VAD 确认有滞后，把语音开头也包含进录音
-          vc.segStart = Math.max(0, vc.recChunks.length - 4);
-          vc.segLen = 0;
-          setVoiceStatus(t('voice-recording'), 'recording');
-        }
-        break;
-      case 'recording':
-        // 静音 0.3s 或句子超 15s → 断句识别（低延迟：说完稍顿即识别）
-        if (vc.vadSilence >= 3 || vc.segLen >= (vc.micCtx.sampleRate || 16000) * 15) {
-          vc.vadSilence = 0;
-          vc.vadSpeech = 0;
-          transcribeSegment();
-        }
-        break;
-      case 'thinking':
-        // 思考中用户直接说话 → 转入录音（停止旧回复朗读，等待中的旧回复到达时不再朗读）
-        if (vc.vadSpeech >= 2) {
-          vc.vadSpeech = 0;
-          vc.vadSilence = 0;
-          stopSpeak();
-          sentenceQueue.length = 0;
-          pendingText = '';
-          vc.segStart = Math.max(0, vc.recChunks.length - 4);
-          vc.segLen = 0;
-          vc.suppressSpeak = true; // 标记：正在等待的旧回复到达时跳过朗读
-          setVoiceStatus(t('voice-recording'), 'recording');
-        }
-        break;
-      case 'speaking':
-        // 朗读中检测到用户说话（连续 0.2s，且音量盖过扬声器）→ 打断，立即转入记录
-        if (vc.vadSpeech >= 2) {
-          vc.vadSpeech = 0;
-          vc.vadSilence = 0;
-          stopSpeak();
-          sentenceQueue.length = 0;
-          pendingText = '';
-          vc.segStart = Math.max(0, vc.recChunks.length - 4);
-          vc.segLen = 0;
-          setVoiceStatus(t('voice-recording'), 'recording');
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  /* ---- 断句：编码 WAV → ASR → 自动发送 ---- */
-  function transcribeSegment() {
-    if (!vc || vc.busy) return;
-    vc.busy = true;
-    var parts = vc.recChunks.slice(vc.segStart);
-    vc.segStart = vc.recChunks.length;
-    vc.segLen = 0;
-    var total = 0;
-    parts.forEach(function (c) { total += c.length; });
-    // 释放长对话内存：只保留最近段落
-    if (vc.recChunks.length > 512) {
-      vc.recChunks = vc.recChunks.slice(vc.segStart);
-      vc.segStart = 0;
-    }
-    if (total < 1600) { // <0.1s：噪音误触发，忽略
-      vc.busy = false;
-      setVoiceStatus(t('voice-listening'), 'listening');
-      return;
-    }
-    var pcm = new Float32Array(total);
-    var off = 0;
-    parts.forEach(function (c) { pcm.set(c, off); off += c.length; });
-    var wav = encodeWav(pcm, vc.micCtx.sampleRate || 16000);
-    setVoiceStatus(t('voice-working'), 'transcribing');
-    fetch(withToken('/ui/voice-stt'), {
-      method: 'POST',
-      headers: voiceHeaders(),
-      body: JSON.stringify({ audio: wav }),
-    }).then(function (res) {
-      return res && res.ok ? res.json() : Promise.reject(new Error(res ? res.status : ''));
-    }).then(function (j) {
-      if (!vc) return; // 语音模式已在请求期间退出（vc 已释放），丢弃结果
-      vc.busy = false;
-      if (!voiceActive) {
-        setVoiceStatus('', 'off');
-        return;
-      }
-      var text = j && j.text ? String(j.text).trim() : '';
-      if (!text) {
-        setVoiceStatus(t('voice-listening'), 'listening');
-        return;
-      }
-      lastVoiceText = text;
-      $('vv-user-line').textContent = text;
-      // 自动发送（与输入框同路：/ 开头走命令；语音模式消息带 voice 标记，服务端据此注入语音规则）
-      if (text.charAt(0) === '/') post('/ui/command', { line: text });
-      else post('/ui/send', { text: text, voice: true });
-      setVoiceStatus(t('voice-thinking'), 'thinking');
-    }).catch(function (e) {
-      if (vc) vc.busy = false;
-      setVoiceStatus(t('mic-fail') + (e instanceof Error ? e.message : String(e)), 'listening');
-    });
-  }
-
-  /* ---- 朗读：句子级流式（模型边生成边合成，首句延迟最小化） ---- */
-  var speakToken = 0;        // 打断令牌：递增后旧流的所有块全部丢弃
-  var speakQueue = [];       // 待播放 PCM AudioBuffer（全局串行）
-  var speakSource = null;    // 当前播放源
-  var sentenceQueue = [];    // 待合成句子 {text, voice, style}
-  var sentenceBusy = false;  // 是否有 TTS 请求进行中
-  var sentenceVoice = '';    // 当前回复的音色（从 {{voice}} 标记解析）
-  var sentenceStyle = '';    // 当前回复的风格
-  var pendingText = '';      // 模型流式输出累积（切句缓冲）
-
-  /* 进入新回复：重置句子状态 */
-  function resetSentenceStream() {
-    pendingText = '';
-    sentenceVoice = '';
-    sentenceStyle = '';
-    stopSpeak();             // 丢弃上一回复未播完的音频
-  }
-
-  /* 流式增量：累积文本 → 解析标记 → 按句切分 → 逐句入队合成 */
-  function feedSentenceStream(delta) {
-    if (!voiceActive) return;
-    pendingText += delta;
-    // 解析 {{voice: 音色|风格}}（模型应放开头；若跨块到达也能解析）
-    if (!sentenceVoice) {
-      var tag = pendingText.match(/\{\{\s*voice\s*:\s*([^|}]+)\|([^}]+)\s*\}\}/);
-      if (tag) {
-        sentenceVoice = tag[1].trim();
-        sentenceStyle = tag[2].trim();
-        pendingText = pendingText.replace(/\{\{\s*voice\s*:\s*[^}]+\}\}/g, '').replace(/\s+/g, ' ').trim();
-      }
-    }
-    // 标记尚未完整到达（跨块）：先不切句，等标记收齐
-    if (pendingText.indexOf('{{voice') >= 0 && pendingText.indexOf('}}') < 0) return;
-    // 按标点切句（。！？…；换行也切）
-    var cut = pendingText.match(/[^。！？…；\n]*[。！？…；\n]/);
-    while (cut) {
-      var sent = cut[0].trim();
-      pendingText = pendingText.slice(cut[0].length).replace(/^\s+/, '');
-      if (sent) enqueueSentence(sent);
-      cut = pendingText.match(/[^。！？…；\n]*[。！？…；\n]/);
-    }
-  }
-
-  /* 回复结束：把残余文本也合成 */
-  function flushSentenceStream() {
-    var rest = pendingText.trim();
-    pendingText = '';
-    if (rest) enqueueSentence(rest);
-  }
-
-  function enqueueSentence(text) {
-    if (!voiceActive) return;
-    sentenceQueue.push({ text: text, voice: sentenceVoice, style: sentenceStyle });
-    pumpSentence();
-  }
-
-  /* 串行流水线：上一句 TTS 流结束立即发下一句（不等播放完），块进全局队列连续播放 */
-  function pumpSentence() {
-    if (sentenceBusy || !sentenceQueue.length || !voiceActive) return;
-    var item = sentenceQueue.shift();
-    sentenceBusy = true;
-    setVoiceStatus(t('voice-speaking'), 'speaking');
-    try {
-      if (audioCtx && audioCtx.state === 'suspended') void audioCtx.resume();
-    } catch (e) { /* ignore */ }
-    var payload = { text: item.text };
-    if (item.voice) payload.voice = item.voice;
-    if (item.style) payload.style = item.style;
-    fetch(withToken('/ui/voice-tts'), {
-      method: 'POST',
-      headers: voiceHeaders(),
-      body: JSON.stringify(payload),
-    }).then(function (res) {
-      if (!res || !res.ok || !res.body) throw new Error((t('voice-fail') + 'HTTP ' + (res ? res.status : '?')));
-      var reader = res.body.getReader();
-      var decoder = new TextDecoder();
-      var buf = '';
-      function pump() {
-        return reader.read().then(function (r) {
-          if (r.done) { sentenceBusy = false; pumpSentence(); return; }
-          buf += decoder.decode(r.value, { stream: true });
-          var idx;
-          while ((idx = buf.indexOf('\n\n')) >= 0) {
-            var frame = buf.slice(0, idx);
-            buf = buf.slice(idx + 2);
-            frame.split('\n').forEach(function (line) {
-              if (!line.startsWith('data:')) return;
-              var payload2 = line.slice(5).trim();
-              if (!payload2 || payload2 === '[DONE]') return;
-              try {
-                var m = JSON.parse(payload2);
-                if (m.error) throw new Error(m.error);
-                if (m.pcm) queuePcm(m.pcm, speakToken);
-              } catch (e) { /* skip */ }
-            });
-          }
-          return pump();
-        });
-      }
-      return pump().catch(function () { sentenceBusy = false; pumpSentence(); });
-    }).catch(function (e) {
-      sentenceBusy = false;
-      if (voiceActive) pushToast(t('voice-fail') + (e instanceof Error ? e.message : ''));
-      pumpSentence();
-    });
-  }
-
-  function queuePcm(b64, token) {
-    if (!voiceActive || token !== speakToken) return;
-    try {
-      var bin = atob(b64);
-      var pcm = new Int16Array(bin.length / 2);
-      for (var i = 0; i < pcm.length; i++) pcm[i] = (bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8)) << 16 >> 16;
-      var buffer = audioCtx.createBuffer(1, pcm.length, 24000);
-      var data = buffer.getChannelData(0);
-      for (var j = 0; j < pcm.length; j++) data[j] = pcm[j] / 32768;
-      // 先入队，再启动播放：保证第一块也被播放
-      speakQueue.push(buffer);
-      if (!speakSource) playNext(token);
-    } catch (e) { /* ignore bad chunk */ }
-  }
-
-  function playNext(token) {
-    if (!voiceActive || token !== speakToken) return;
-    if (!speakQueue.length) {
-      speakSource = null;
-      // 音频队列读完且无待合成句子：回聆听
-      if (voiceState === 'speaking' && !sentenceBusy && !sentenceQueue.length) {
-        setVoiceStatus(t('voice-listening'), 'listening');
-      }
-      return;
-    }
-    var buffer = speakQueue.shift();
-    var src = audioCtx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(playAnalyser || audioCtx.destination);
-    speakSource = src;
-    src.onended = function () {
-      speakSource = null;
-      if (voiceActive && token === speakToken) playNext(token);
-    };
-    src.start();
-  }
-
-  function stopSpeak() {
-    speakToken++;
-    if (speakSource) {
-      try { speakSource.onended = null; speakSource.stop(); } catch (e) { /* ignore */ }
-      speakSource = null;
-    }
-    speakQueue.length = 0;
-    playRms = 0;
-  }
-
-  /* ---- 水波球动效：多层同心水波 + 中心球体，音量驱动 ---- */
-  var animSmooth = 0; // 音量平滑值
-  function drawVoiceAnim() {
-    if (!voiceActive) return;
-    var cv = $('voice-canvas');
-    var g = cv.getContext('2d');
-    var W = cv.width, H = cv.height;
-    var cx = W / 2, cy = H / 2;
-    g.clearRect(0, 0, W, H);
-    var vol = voiceState === 'speaking' ? Math.max(playRms, micRms * 0.6) : micRms;
-    animSmooth += (vol - animSmooth) * 0.3;
-    if (animSmooth < 0) animSmooth = 0;
-    var v = Math.min(1, animSmooth);
-    var hue = voiceState === 'recording' ? 340 : voiceState === 'speaking' ? 160 : 205;
-    var now = Date.now();
-    var breathe = 1 + Math.sin(now / 750) * 0.025;
-    var R = (86 + v * 26) * breathe; // 球体半径，随音量呼吸
-
-    // 球体主体：径向渐变（亮心 → 半透明边缘）
-    var bg = g.createRadialGradient(cx - R * 0.35, cy - R * 0.35, 4, cx, cy, R * 1.15);
-    bg.addColorStop(0, 'hsla(' + hue + ', 90%, 78%, 0.95)');
-    bg.addColorStop(0.45, 'hsla(' + hue + ', 85%, 62%, 0.75)');
-    bg.addColorStop(1, 'hsla(' + hue + ', 80%, 45%, 0.18)');
-    g.beginPath();
-    g.arc(cx, cy, R, 0, Math.PI * 2);
-    g.fillStyle = bg;
-    g.fill();
-
-    // 球面高光（左上椭圆亮点，模拟水球光泽）
-    g.beginPath();
-    g.ellipse(cx - R * 0.34, cy - R * 0.4, R * 0.22, R * 0.13, -0.6, 0, Math.PI * 2);
-    g.fillStyle = 'hsla(' + hue + ', 100%, 92%, 0.55)';
-    g.fill();
-
-    // 水波环：从球心向外扩散，环径随 sin 波动（音量越大波幅越强），波峰亮波谷暗
-    var rings = 22;
-    for (var i = 0; i < rings; i++) {
-      var baseR = (i / rings) * (R * 1.55 + 34) + 5;
-      var ph = baseR * 0.24 - now / 320;
-      var wave = Math.sin(ph) * (2 + v * 15);
-      var rr = Math.max(1.5, baseR + wave);
-      var waveBright = (Math.sin(ph) * 0.5 + 0.5);
-      var a = 0.06 + waveBright * (0.32 + v * 0.38) * (1 - i / rings * 0.55);
-      if (a <= 0.02) continue;
-      g.beginPath();
-      g.arc(cx, cy, rr, 0, Math.PI * 2);
-      g.strokeStyle = 'hsla(' + hue + ', 88%, ' + (58 + v * 16 + waveBright * 10) + '%, ' + a + ')';
-      g.lineWidth = 1.6;
-      g.stroke();
-    }
-
-    // 外圈偶发涟漪（每 2.4s 扩散一圈，像水珠落水）
-    var ripples = [0.0, 0.55];
-    for (var k = 0; k < ripples.length; k++) {
-      var t = ((now / 2400 + ripples[k]) % 1);
-      var rr2 = 8 + t * (R * 1.9 + 60);
-      var a2 = (1 - t) * (0.16 + v * 0.2);
-      if (a2 <= 0.02) continue;
-      g.beginPath();
-      g.arc(cx, cy, rr2, 0, Math.PI * 2);
-      g.strokeStyle = 'hsla(' + hue + ', 90%, 72%, ' + a2 + ')';
-      g.lineWidth = 2;
-      g.stroke();
-    }
-
-    // 中心亮点（声芯）
-    var core = 7 + v * 14;
-    var cg = g.createRadialGradient(cx, cy, 1, cx, cy, core + 8);
-    cg.addColorStop(0, 'rgba(255,255,255,0.95)');
-    cg.addColorStop(1, 'hsla(' + hue + ', 95%, 78%, 0)');
-    g.beginPath();
-    g.arc(cx, cy, core + 8, 0, Math.PI * 2);
-    g.fillStyle = cg;
-    g.fill();
-
-    rafTimer = requestAnimationFrame(drawVoiceAnim);
-  }
-
   /* ---- 按住说话（快速录入，不进入连续模式） ---- */
   var micRec = null;
   function startMic() {
-    if (micRec || voiceActive) return;
+    if (micRec) return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       pushToast(t('mic-fail') + 'getUserMedia unavailable');
       return;
@@ -2555,7 +2000,7 @@
     }
   });
 
-  /* ---- 语音：按住说话 + 语音回复开关 ---- */
+  /* ---- 语音：按住说话（回合制） ---- */
   var micBtn = $('btn-mic');
   var micDown = false;
   function micPress(e) {
@@ -2578,16 +2023,6 @@
   micBtn.addEventListener('touchend', micRelease);
   micBtn.addEventListener('touchcancel', micRelease);
 
-  var voiceBtn = $('btn-voice');
-  voiceBtn.addEventListener('click', function () {
-    if (voiceActive) exitVoiceMode();
-    else enterVoiceMode();
-  });
-  $('voice-exit').addEventListener('click', exitVoiceMode);
-  // Esc 退出语音模式
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && voiceActive) exitVoiceMode();
-  });
   inputEl.addEventListener('keyup', function (e) {
     if (e.key === '@') post('/ui/command', { line: '/at' });
   });

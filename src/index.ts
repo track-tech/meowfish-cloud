@@ -180,7 +180,7 @@ export class MeowFishApp {
     const action = path.slice(4);
     switch (action) {
       case 'send':
-        if (typeof body.text === 'string') this.state.waitUntil(driver.send(body.text, body.voice === true));
+        if (typeof body.text === 'string') this.state.waitUntil(driver.send(body.text));
         return json({ ok: true });
       case 'command':
         if (typeof body.line === 'string') this.state.waitUntil(driver.command(body.line));

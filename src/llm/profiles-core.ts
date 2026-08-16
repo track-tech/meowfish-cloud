@@ -17,10 +17,8 @@ export interface AppConfig {
     userDescription: string;
     /** 界面语言（Web UI 双语：zh / en；缺省视为 zh） */
     lang?: 'zh' | 'en';
-    /** MiMo 语音 API Key（实时对话：识别 + 合成；云端存浏览器 localStorage，本地可存 secrets.json） */
+    /** MiMo 语音 API Key（按住说话语音识别；云端存浏览器 localStorage，本地可存 secrets.json） */
     mimoKey?: string;
-    /** 语音对话模式开关（云端零持久化：随配置存浏览器 localStorage，DO 回收后可恢复） */
-    voiceChat?: boolean;
     /** yolo 全部放行模式开关（云端零持久化：随配置存浏览器 localStorage，DO 回收后可恢复） */
     yolo?: boolean;
   };

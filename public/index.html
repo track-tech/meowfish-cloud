@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>MeowFish · 喵鱼</title>
-  <link rel="stylesheet" href="/style.css?v=52">
+  <link rel="stylesheet" href="/style.css?v=53">
 </head>
 <body>
   <aside id="sidebar" class="glass">
@@ -72,7 +72,6 @@
       <button data-cmd="/character" data-i18n-title="character"><svg class="ico" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg><span data-i18n="character">角色</span></button>
       <button data-cmd="/tools" data-i18n-title="tools"><svg class="ico" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg><span data-i18n="tools">工具</span></button>
       <button id="btn-sshterm" data-i18n-title="sshterm"><svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg><span data-i18n="sshterm">终端</span></button>
-      <button id="btn-voice" data-i18n-title="voice"><svg class="ico" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg><span data-i18n="voice">语音</span></button>
       <div class="quickbar-more-wrap">
         <button id="quickbar-more" class="more-btn" data-i18n-title="more" title="更多"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
       </div>
@@ -101,24 +100,6 @@
           <button class="modal-btn primary" id="local-confirm-ok"></button>
           <button class="modal-btn" id="local-confirm-cancel"></button>
         </div>
-      </div>
-    </div>
-
-    <!-- 免提连续语音对话视图（替换主界面） -->
-    <div id="voice-view" class="hidden">
-      <div class="vv-top">
-        <span class="vv-title" id="voice-mode-title" data-i18n="voice-mode-title">免提语音对话</span>
-        <span class="vv-hint" id="vv-hint"></span>
-        <button id="voice-exit" data-i18n="voice-exit">退出</button>
-      </div>
-      <div class="vv-stage">
-        <div class="vv-glow"></div>
-        <canvas id="voice-canvas" width="360" height="360"></canvas>
-        <div class="vv-status" id="voice-status">…</div>
-      </div>
-      <div class="vv-subs">
-        <div class="vv-line" id="vv-user-line"></div>
-        <div class="vv-line" id="vv-bot-line"></div>
       </div>
     </div>
   </div>
@@ -174,6 +155,6 @@
 
   <button id="ssh-term-minibutton" class="hidden" type="button" title="恢复 SSH 终端"><svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></button>
 
-  <script src="/app.js?v=52"></script>
+  <script src="/app.js?v=53"></script>
 </body>
 </html>
