@@ -223,6 +223,9 @@ export class MeowFishApp {
       case 'delete-sessions':
         if (Array.isArray(body.ids)) this.state.waitUntil(driver.deleteSessions(body.ids.filter((x): x is string => typeof x === 'string')));
         return json({ ok: true });
+      case 'delete-all':
+        this.state.waitUntil(driver.deleteAllSessions());
+        return json({ ok: true });
       case 'toggle-pin':
         if (typeof body.id === 'string') this.state.waitUntil(driver.togglePin(body.id));
         return json({ ok: true });

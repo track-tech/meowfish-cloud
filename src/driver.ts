@@ -912,6 +912,24 @@ export class CfDriver {
     );
   }
 
+  async deleteAllSessions(): Promise<void> {
+    // 删除全部前先停掉当前生成，避免旧流写回已被删除的会话
+    this.genToken++;
+    this.abort();
+    for (const s of await this.stores.listSessions()) await this.stores.deleteSession(s.id);
+    if (!this.card) {
+      this.ui.pushSystem(this.lang === 'en' ? 'No character card — cannot create a new chat' : '没有角色卡，无法新建对话');
+      return;
+    }
+    this.session = this.newSession(this.card.data.name);
+    const greeting = this.card.data.first_mes || '你好呀。';
+    this.session.messages.push({ role: 'assistant', content: greeting });
+    this.ui.setTitle(this.card.data.name);
+    this.syncDisplay();
+    await this.saveSession();
+    this.ui.pushSystem(this.lang === 'en' ? 'All conversations deleted, new chat created' : '已删除全部对话，已新建空白会话');
+  }
+
   async deleteSessions(ids: string[]): Promise<void> {
     const targets = [...new Set(ids)].filter((id) => id !== this.session?.id);
     if (!targets.length) {

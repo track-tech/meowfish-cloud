@@ -6,7 +6,7 @@
   var I18N = {
     zh: {
       'manage': '管理', 'done': '完成', 'new-chat': '新建对话',
-      'select-all': '全选', 'cancel': '取消', 'delete-selected': '删除所选',
+      'select-all': '全选', 'cancel': '取消', 'delete-selected': '删除所选', 'delete-all': '删除全部',
       'model': '模型', 'theme': '主题', 'menu': '菜单', 'more': '更多', 'daynight-short': '日夜',
       'regenerate': '重生成', 'continue': '续写', 'character': '角色',
       'profile': '设定', 'tools': '工具', 'search': '搜索', 'sshterm': '终端',
@@ -19,6 +19,7 @@
       'recent-sessions': '最近会话', 'empty-session': '未命名会话',
       'confirm-del-session': '确定删除这个会话吗？',
       'confirm-del-sessions': '确定删除选中的 {n} 个会话吗？此操作不可恢复。',
+      'confirm-del-all': '确定删除全部对话吗？当前对话也会被清空，并自动新建一个。',
       'confirm-title': '确认操作',
       'mic-hold': '按住说话（松开识别）', 'mic-listening': '正在聆听…松开结束',
       'mic-working': '正在识别…', 'mic-no-key': '未配置 MiMo API Key：点「设置 → 实时语音（MiMo）」填写',
@@ -32,7 +33,7 @@
     },
     en: {
       'manage': 'Manage', 'done': 'Done', 'new-chat': '＋ New Chat',
-      'select-all': 'Select All', 'cancel': 'Cancel', 'delete-selected': 'Delete Selected',
+      'select-all': 'Select All', 'cancel': 'Cancel', 'delete-selected': 'Delete Selected', 'delete-all': 'Delete All',
       'model': 'Model', 'theme': 'Theme', 'menu': 'Menu', 'more': 'More', 'daynight-short': 'Day/Night',
       'regenerate': 'Regenerate', 'continue': 'Continue', 'character': 'Character',
       'profile': 'Profile', 'tools': 'Tools', 'search': 'Search', 'sshterm': 'Terminal',
@@ -45,6 +46,7 @@
       'recent-sessions': 'Recent Sessions', 'empty-session': 'Untitled Session',
       'confirm-del-session': 'Delete this session?',
       'confirm-del-sessions': 'Delete {n} selected sessions? This cannot be undone.',
+      'confirm-del-all': 'Delete all conversations? The current one will also be cleared and a new chat created.',
       'confirm-title': 'Confirm',
       'mic-hold': 'Hold to talk (release to transcribe)', 'mic-listening': 'Listening… release to finish',
       'mic-working': 'Transcribing…', 'mic-no-key': 'MiMo API Key not set: Settings → Voice (MiMo)',
@@ -2085,6 +2087,13 @@
     if (!ids.length) return;
     localConfirm(t('confirm-del-sessions').replace('{n}', String(ids.length)), function () {
       post('/ui/delete-sessions', { ids: ids });
+      setManageMode(false);
+      $('btn-manage').textContent = t('manage');
+    });
+  });
+  $('btn-manage-delete-all').addEventListener('click', function () {
+    localConfirm(t('confirm-del-all'), function () {
+      post('/ui/delete-all', {});
       setManageMode(false);
       $('btn-manage').textContent = t('manage');
     });
