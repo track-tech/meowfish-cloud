@@ -395,6 +395,17 @@ export class CfDriver {
             row.usage && typeof row.usage === 'object' && typeof row.usage.promptTokens === 'number' && typeof row.usage.completionTokens === 'number'
               ? row.usage
               : { promptTokens: 0, completionTokens: 0 };
+          // 云端 DO 可能仍是热的：不能每次都用浏览器 localStorage 全量覆盖，
+          // 否则旧标签页/上次未同步完的本地数据会把较新的会话回滚成旧内容。
+          // 按 updatedAt 合并，同时间戳取消息更多的一方，避免「会话相互污染」。
+          const existing = await this.stores.loadSession(row.id);
+          if (existing) {
+            const localUpdated = typeof row.updatedAt === 'number' ? row.updatedAt : 0;
+            const doUpdated = typeof existing.updatedAt === 'number' ? existing.updatedAt : 0;
+            const localCount = row.messages.length;
+            const doCount = existing.messages.length;
+            if (localUpdated < doUpdated || (localUpdated === doUpdated && localCount <= doCount)) continue;
+          }
           await this.stores.saveSession({ ...row, usage } as CfSessionRow);
         }
       }
