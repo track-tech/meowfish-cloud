@@ -240,9 +240,16 @@ export class CfDriver {
     const wanted = this.config.general.defaultCharacter;
     this.card = (this.cards.find((c) => c.name === wanted) ?? this.cards[0])?.data ?? null;
 
-    this.session = (await this.stores.listSessions())[0] ?? null;
-    if (!this.session) {
+    const initialSession = (await this.stores.listSessions())[0] ?? null;
+    if (!initialSession) {
       this.session = this.newSession(this.card?.data.name ?? '喵鱼');
+    } else {
+      this.session = initialSession;
+      // DO 热启动时可能已恢复出非默认角色会话：卡片要跟随会话角色，而不是默认角色
+      if (initialSession.character) {
+        const hit = this.cards.find((c) => c.name === initialSession.character);
+        if (hit) this.card = hit.data;
+      }
     }
     // 从浏览器配置恢复跨请求开关（零持久化红线：不能只存 DO 内存）
     this.yolo = this.config.general.yolo === true;
@@ -348,6 +355,9 @@ export class CfDriver {
   }
 
   private get assistantName(): string {
+    // 优先用当前会话绑定的角色名：即使角色卡因本地数据未同步而暂时缺失，
+    // 也不能让黑雪会话显示成喵鱼（避免“会话相互污染”的观感）。
+    if (this.session?.character) return this.session.character;
     return this.card?.data.name ?? '喵鱼';
   }
 
@@ -422,7 +432,14 @@ export class CfDriver {
     }
     if (typeof raw.currentId === 'string' && raw.currentId) {
       const s = await this.stores.loadSession(raw.currentId);
-      if (s) this.session = s;
+      if (s) {
+        this.session = s;
+        // 恢复当前会话绑定的角色卡：不能用默认角色覆盖，否则黑雪会话会显示成喵鱼
+        if (s.character) {
+          const hit = this.cards.find((c) => c.name === s.character);
+          if (hit) this.card = hit.data;
+        }
+      }
     }
     this.ui.setModeLabel(this.toolsOn ? 'AGENT' : 'RP');
     this.ui.setToolsBadge?.(this.toolsOn);
