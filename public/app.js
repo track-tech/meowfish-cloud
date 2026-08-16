@@ -1647,6 +1647,24 @@
     connectTermTab(tab, cfg);
   }
 
+  /** ＋ 新建连接：直接复用当前标签配置（或最近成功配置），像桌面终端一样秒开，不再弹窗 */
+  function openNewTermTab() {
+    var t = activeTerm();
+    var cfg = t ? t.cfg : (loadAppSshConfig() || loadSshTermConfig());
+    if (!cfg) { openSshTermForm(true); return; }
+    var copy = {
+      host: cfg.host,
+      port: Number(cfg.port) || 22,
+      user: cfg.user,
+      authKind: cfg.authKind === 'key' ? 'key' : 'password',
+      password: cfg.password || '',
+      privateKey: cfg.privateKey || '',
+      fingerprint: cfg.fingerprint || '',
+      profileName: cfg.profileName || '',
+    };
+    addTermTab(copy);
+  }
+
   function loadTermGeom() {
     try {
       var g = JSON.parse(localStorage.getItem(TERM_GEOM_KEY) || 'null');
@@ -2657,7 +2675,7 @@
   $('ssh-term-min').addEventListener('click', minimizeTermWindow);
   $('ssh-term-minibutton').addEventListener('click', restoreTermWindow);
   $('ssh-term-reconfig').addEventListener('click', function () { openSshTermForm(false); });
-  $('ssh-term-new').addEventListener('click', function () { openSshTermForm(true); });
+  $('ssh-term-new').addEventListener('click', openNewTermTab);
   $('ssh-term-max').addEventListener('click', toggleTermMax);
   $('ssh-term-clear').addEventListener('click', clearActiveTerm);
   $('ssh-term-reconnect').addEventListener('click', reconnectActiveTerm);
