@@ -2669,6 +2669,7 @@
     var menu = $('quickbar-menu');
     menu.classList.toggle('hidden');
     if (!menu.classList.contains('hidden')) {
+      menu.style.right = 'auto';
       var r = $('quickbar-more').getBoundingClientRect();
       var w = menu.offsetWidth || 180;
       var left = r.right - w;
