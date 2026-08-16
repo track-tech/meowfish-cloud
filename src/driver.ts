@@ -509,12 +509,12 @@ export class CfDriver {
   }
 
   /** 单条远程命令执行（含 TOFU 指纹记录与超时；用户中断时立即断开） */
-  private async sshRun(cmd: string, timeoutMs = 60_000): Promise<string> {
+  private async sshRun(cmd: string, timeoutMs = 60_000, signal?: AbortSignal): Promise<string> {
     const ssh = this.sshCfg();
     if (!ssh) return '（未配置 SSH 服务器：用 /ssh 配置后即可控制远程服务器）';
     const { sshExec } = await import('./ssh.js');
     const { cloudflareTcp } = await import('./socket.js');
-    const r = await sshExec({ ...ssh, timeoutMs, signal: this.abortCtrl?.signal, transport: cloudflareTcp }, cmd);
+    const r = await sshExec({ ...ssh, timeoutMs, signal: signal ?? this.abortCtrl?.signal, transport: cloudflareTcp }, cmd);
     if (!this.config.ssh!.fingerprint && r.hostFingerprint) {
       // 首次连接：记录主机指纹（TOFU）
       this.config.ssh!.fingerprint = r.hostFingerprint;
@@ -529,17 +529,17 @@ export class CfDriver {
   }
 
   /** 文件/bash 工具经 SSH 执行 */
-  private async sshTool(name: string, args: Record<string, unknown>): Promise<string> {
+  private async sshTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     switch (name) {
       case 'bash':
-        return this.sshRun(String(args.command ?? ''), 120_000);
+        return this.sshRun(String(args.command ?? ''), 120_000, signal);
       case 'read_file':
-        return this.sshRun(buildReadCmd(String(args.path ?? '')), 30_000);
+        return this.sshRun(buildReadCmd(String(args.path ?? '')), 30_000, signal);
       case 'write_file': {
         const path = String(args.path ?? '');
         const content = String(args.content ?? '');
         for (const c of buildWriteCmd(path, content)) {
-          const out = await this.sshRun(c, 30_000);
+          const out = await this.sshRun(c, 30_000, signal);
           if (out.startsWith('（')) return out;
         }
         return `已写入 ${path}（${content.length} 字符）`;
@@ -549,14 +549,14 @@ export class CfDriver {
         const oldStr = String(args.old_string ?? '');
         const newStr = String(args.new_string ?? '');
         const replaceAll = args.replace_all === true;
-        const original = await this.sshRun(buildReadCmd(path), 30_000);
+        const original = await this.sshRun(buildReadCmd(path), 30_000, signal);
         if (original.startsWith('（')) return original;
         const count = original.split(oldStr).length - 1;
         if (count === 0) return `未找到匹配内容: ${oldStr.slice(0, 80)}`;
         if (count > 1 && !replaceAll) return `old_string 出现了 ${count} 次，不唯一。请加长上下文使其唯一，或设置 replace_all: true`;
         const updated = replaceAll ? original.split(oldStr).join(newStr) : original.replace(oldStr, newStr);
         for (const c of buildWriteCmd(path, updated)) {
-          const out = await this.sshRun(c, 30_000);
+          const out = await this.sshRun(c, 30_000, signal);
           if (out.startsWith('（')) return out;
         }
         return `已修改 ${path}（替换 ${count} 处）`;
@@ -564,24 +564,24 @@ export class CfDriver {
       case 'glob': {
         const pattern = String(args.pattern ?? '*').split('\\').join('/');
         const base = String(args.path ?? '.');
-        const out = await this.sshRun(buildListCmd(base), 30_000);
+        const out = await this.sshRun(buildListCmd(base), 30_000, signal);
         if (out.startsWith('（')) return out;
         const re = globToRegExp(pattern);
         const matched = out.split('\n').map((l) => l.trim()).filter((l) => l && re.test(l)).slice(0, 200);
         return matched.length ? matched.join('\n') : '（无匹配文件）';
       }
       case 'grep':
-        return this.sshRun(buildGrepCmd(String(args.pattern ?? ''), String(args.path ?? '.')), 60_000);
+        return this.sshRun(buildGrepCmd(String(args.pattern ?? ''), String(args.path ?? '.')), 60_000, signal);
       default:
         return `未知工具: ${name}`;
     }
   }
 
-  private async callTool(name: string, args: Record<string, unknown>, authorized: boolean): Promise<string> {
+  private async callTool(name: string, args: Record<string, unknown>, authorized: boolean, signal?: AbortSignal): Promise<string> {
     if (name === 'web_search' || name === 'web_fetch') {
       // 联网工具直接在 Worker 执行（CF 网络无墙）
       if (name === 'web_search') {
-        const results = await webSearch(String(args.query ?? ''), Number(args.count ?? 5), this.abortCtrl?.signal, Number(args.page ?? 1));
+        const results = await webSearch(String(args.query ?? ''), Number(args.count ?? 5), signal ?? this.abortCtrl?.signal, Number(args.page ?? 1));
         return results.length
           ? results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n\n')
           : '（没有搜到结果）';
@@ -592,7 +592,7 @@ export class CfDriver {
     }
     // 纵深防御：即使调用方漏判，未授权的写操作/命令也不得执行
     if (!authorized && !READ_TOOLS.has(name)) return '（操作未获用户授权）';
-    if (this.sshCfg()) return this.sshTool(name, args);
+    if (this.sshCfg()) return this.sshTool(name, args, signal);
     // 未配置 SSH 且未配置工具守护：直接给模型可执行的 /ssh 引导，避免它去猜 wrangler.toml
     if (!this.env.toolServerConfigured) {
       return this.lang === 'en'
@@ -727,11 +727,12 @@ export class CfDriver {
     const genToken = ++this.genToken;
     this.activeSessionId = target.id;
     this.abortCtrl = new AbortController();
+    const signal = this.abortCtrl.signal;
     this.ui.setStatus('thinking');
     try {
       // 工具暴露：电脑权限开 → 全部；仅联网开关开 → 仅 web 工具；都关 → 无工具
       const defs = this.toolsOn ? TOOL_DEFS : this.webSearchOn ? WEB_ONLY_TOOL_DEFS : [];
-      await this.toolLoop(target, card, defs, genToken);
+      await this.toolLoop(target, card, defs, genToken, signal);
       // 后台完成：即使期间用户切到别的会话/开了新生成，仍要把结果写回原会话
       if (this.session?.id === target.id) {
         this.ui.finalizeStreaming();
@@ -762,7 +763,7 @@ export class CfDriver {
 
   /** 工具循环（本地实现，不依赖 node 环境）。toolDefs 决定暴露哪些工具：
    *  默认全部（电脑权限开）；传 WEB_ONLY_TOOL_DEFS 则仅联网工具 */
-  private async toolLoop(target: CfSessionRow, card: CharacterCard, toolDefs: ToolDef[] = TOOL_DEFS, genToken: number): Promise<void> {
+  private async toolLoop(target: CfSessionRow, card: CharacterCard, toolDefs: ToolDef[] = TOOL_DEFS, genToken: number, signal: AbortSignal): Promise<void> {
     const systemMsg: ChatMessage = {
       role: 'system',
       content: buildRpSystem(card, this.rpUser) + '\n\n' + buildToolSection(toolDefs.map((t) => t.function.name), this.sshCfg() ? `SSH 远程服务器 ${this.sshLabel()}` : '（未配置 SSH 服务器）'),
@@ -780,7 +781,7 @@ export class CfDriver {
           profile: genProfile,
           apiKey: genProfile.apiKey,
           tools: toolDefs,
-          signal: this.abortCtrl!.signal,
+          signal,
           onEvent: (ev) => {
             if (!isActive()) return;
             if (ev.reasoningDelta) {
@@ -837,7 +838,7 @@ export class CfDriver {
         let output: string;
         try {
           output = check.allowed
-            ? await this.callTool(name, args, true)
+            ? await this.callTool(name, args, true, signal)
             : (check.output ?? '（用户拒绝了该操作）');
         } catch (e) {
           output = `工具执行出错: ${e instanceof Error ? e.message : String(e)}`;
