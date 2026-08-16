@@ -297,13 +297,11 @@ const CN_SEARCH_PROVIDERS: SearchProvider[] = [
   { name: 'sogou', buildUrl: (q) => `https://www.sogou.com/web?query=${encodeURIComponent(q)}`, parse: parseSogou, timeoutMs: 8000 },
 ];
 
-/** 补充引擎：Cloudflare Worker 环境可用；国内直连失败时由国内引擎结果兜底 */
+/** 补充引擎：Cloudflare Worker 环境可用；国内直连失败时由国内引擎结果兜底。
+ *  故意只保留少量引擎，避免单次搜索发起过多子请求触发 Workers subrequest 上限。 */
 const GLOBAL_SEARCH_PROVIDERS: SearchProvider[] = [
   { name: 'google', buildUrl: (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}&num=10`, parse: parseGoogle, timeoutMs: 6000 },
   { name: 'brave', buildUrl: (q) => `https://search.brave.com/search?q=${encodeURIComponent(q)}`, parse: parseBrave, timeoutMs: 6000 },
-  { name: 'yandex', buildUrl: (q) => `https://yandex.com/search/?text=${encodeURIComponent(q)}`, parse: parseYandex, timeoutMs: 6000 },
-  { name: 'ddg-lite', buildUrl: (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`, parse: parseDdgLite, timeoutMs: 6000 },
-  { name: 'ddg-html', buildUrl: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, parse: parseDdgHtml, timeoutMs: 6000 },
 ];
 
 async function queryProvider(provider: SearchProvider, query: string, count: number, signal?: AbortSignal): Promise<SearchResult[]> {

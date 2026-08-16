@@ -773,6 +773,7 @@ export class CfDriver {
     let streaming = false;
     let streamingContent = false;
     let streamingReasoning = false;
+    let searchBudget = 3; // 单次回复最多联网几次，防止触发 Workers 子请求上限
     const isActive = () => genToken === this.genToken && this.session?.id === target.id;
     for (let iter = 0; iter < 25; iter++) {
       const reqMessages: ChatMessage[] = [systemMsg, ...messages];
@@ -837,12 +838,20 @@ export class CfDriver {
         const check = await this.checkPermission(name, detail);
         if (signal.aborted) return;
         let output: string;
-        try {
-          output = check.allowed
-            ? await this.callTool(name, args, true, signal)
-            : (check.output ?? '（用户拒绝了该操作）');
-        } catch (e) {
-          output = `工具执行出错: ${e instanceof Error ? e.message : String(e)}`;
+        const isSearch = name === 'web_search' || name === 'web_fetch';
+        if (isSearch && searchBudget <= 0) {
+          output = this.lang === 'en'
+            ? '（Network request limit reached for this reply. Please answer from the information already gathered or ask the user to search manually.）'
+            : '（本次回复的联网请求次数已达上限，请根据已有信息回答，或让用户手动搜索。）';
+        } else {
+          try {
+            output = check.allowed
+              ? await this.callTool(name, args, true, signal)
+              : (check.output ?? '（用户拒绝了该操作）');
+          } catch (e) {
+            output = `工具执行出错: ${e instanceof Error ? e.message : String(e)}`;
+          }
+          if (isSearch && check.allowed) searchBudget--;
         }
         if (signal.aborted) return;
         if (isActive()) this.ui.replaceLastMessage({ role: 'tool', toolLabel: output.split('\n')[0]?.slice(0, 60) ?? '', content: output });
