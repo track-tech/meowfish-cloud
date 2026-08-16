@@ -222,8 +222,8 @@ export class CfDriver {
   card: CharacterCard | null = null;
   cards: { name: string; data: CharacterCard }[] = [];
   private abortCtrl: AbortController | null = null;
-  /** 当前 abortCtrl 所属会话；用于允许其他会话在后台生成时继续发消息 */
-  private activeSessionId: string | null = null;
+  /** 正在后台/前台生成的会话集合；用于允许其他会话在后台生成时继续发消息，同时阻止同一会话重复生成 */
+  private activeSessions = new Set<string>();
   private yolo = false;
   /** 生成令牌：切换会话/新建会话时递增，旧生成的所有 UI/落库操作立即失效，防止对话串台 */
   private genToken = 0;
@@ -371,7 +371,7 @@ export class CfDriver {
 
   private get busy(): boolean {
     // 只阻塞当前会话自己的生成；其他会话可在后台生成期间继续对话
-    return this.abortCtrl !== null && this.activeSessionId === this.session?.id;
+    return this.activeSessions.has(this.session?.id ?? '');
   }
 
   private tokensLabel(): string {
@@ -689,7 +689,7 @@ export class CfDriver {
 
   private async directBash(command: string): Promise<void> {
     if (!command) return;
-    this.activeSessionId = this.session?.id ?? null;
+    if (this.session) this.activeSessions.add(this.session.id);
     this.abortCtrl = new AbortController();
     try {
       this.ui.pushMessage({ role: 'tool', toolLabel: command.slice(0, 60), content: '运行中…' });
@@ -707,8 +707,8 @@ export class CfDriver {
       this.ui.replaceLastMessage({ role: 'tool', toolLabel: '执行出错', content: msg });
       this.ui.setStatus('error', msg);
     } finally {
+      if (this.session) this.activeSessions.delete(this.session.id);
       this.abortCtrl = null;
-      this.activeSessionId = null;
     }
   }
 
@@ -725,7 +725,7 @@ export class CfDriver {
     const target = this.session;
     if (!target) return;
     const genToken = ++this.genToken;
-    this.activeSessionId = target.id;
+    this.activeSessions.add(target.id);
     this.abortCtrl = new AbortController();
     const signal = this.abortCtrl.signal;
     this.ui.setStatus('thinking');
@@ -733,6 +733,7 @@ export class CfDriver {
       // 工具暴露：电脑权限开 → 全部；仅联网开关开 → 仅 web 工具；都关 → 无工具
       const defs = this.toolsOn ? TOOL_DEFS : this.webSearchOn ? WEB_ONLY_TOOL_DEFS : [];
       await this.toolLoop(target, card, defs, genToken, signal);
+      if (signal.aborted) return;
       // 后台完成：即使期间用户切到别的会话/开了新生成，仍要把结果写回原会话
       if (this.session?.id === target.id) {
         this.ui.finalizeStreaming();
@@ -743,7 +744,7 @@ export class CfDriver {
     } catch (e) {
       if (genToken !== this.genToken) return;
       if (this.session?.id === target.id) {
-        const aborted = this.abortCtrl.signal.aborted;
+        const aborted = signal.aborted;
         if (aborted) {
           this.ui.failStreaming('（已中断）');
           this.ui.setStatus('idle');
@@ -754,9 +755,9 @@ export class CfDriver {
         }
       }
     } finally {
+      this.activeSessions.delete(target.id);
       if (genToken === this.genToken) {
         this.abortCtrl = null;
-        this.activeSessionId = null;
       }
     }
   }
@@ -806,13 +807,13 @@ export class CfDriver {
         },
         reqMessages,
       );
-      if (genToken !== this.genToken) return;
+      if (signal.aborted) return;
       target.usage.promptTokens += result.usage.promptTokens;
       target.usage.completionTokens += result.usage.completionTokens;
       messages.push(result.message);
       if (!result.message.tool_calls?.length) break;
       for (const call of result.message.tool_calls) {
-        if (genToken !== this.genToken) return;
+        if (signal.aborted) return;
         if (isActive() && streaming) {
           if (!streamingContent && !streamingReasoning) this.ui.removeLastMessage();
           else this.ui.finalizeStreaming();
@@ -834,7 +835,7 @@ export class CfDriver {
           this.ui.pushMessage({ role: 'tool', toolLabel: `${name}${label ? ': ' + label : ''}`, content: '运行中…' });
         }
         const check = await this.checkPermission(name, detail);
-        if (genToken !== this.genToken) return;
+        if (signal.aborted) return;
         let output: string;
         try {
           output = check.allowed
@@ -843,12 +844,12 @@ export class CfDriver {
         } catch (e) {
           output = `工具执行出错: ${e instanceof Error ? e.message : String(e)}`;
         }
-        if (genToken !== this.genToken) return;
+        if (signal.aborted) return;
         if (isActive()) this.ui.replaceLastMessage({ role: 'tool', toolLabel: output.split('\n')[0]?.slice(0, 60) ?? '', content: output });
         messages.push({ role: 'tool', content: output, tool_call_id: call.id });
       }
     }
-    if (genToken !== this.genToken) return;
+    if (signal.aborted) return;
     target.messages = messages;
   }
 
