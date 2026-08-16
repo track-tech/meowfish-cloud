@@ -665,7 +665,7 @@
     if (manageMode) {
       $('manage-select-all').checked = selectable.length > 0 && selectable.every(function (s) { return selected[s.id]; });
       var count = selectable.filter(function (s) { return selected[s.id]; }).length;
-      $('btn-manage-delete').textContent = t('delete-selected') + (count ? '(' + count + ')' : '');
+      $('btn-manage-delete').textContent = '删除' + (count ? ' (' + count + ')' : '');
     }
   }
 
